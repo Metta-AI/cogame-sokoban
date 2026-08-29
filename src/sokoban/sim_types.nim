@@ -192,6 +192,24 @@ proc truncateRunes*(text: string, limit: int): string =
     return text
   text.runeSubStr(0, limit)
 
+proc truncateUtf8Bytes*(text: string, limit: int): string =
+  ## Cuts `text` to at most `limit` BYTES, backing up to the nearest rune
+  ## boundary. Some caps are genuinely byte caps — what a provider is allowed
+  ## to hand us before we parse it — and a plain byte slice there can cut a
+  ## codepoint in half. `truncateRunes` downstream only SHORTENS; it cannot
+  ## repair a codepoint that was already split, so the repair has to happen at
+  ## the cut itself.
+  if limit <= 0:
+    return ""
+  if text.len <= limit:
+    return text
+  var cut = limit
+  ## UTF-8 continuation bytes are 0b10xxxxxx: step back off the middle of a
+  ## sequence to the byte that starts it.
+  while cut > 0 and (uint8(text[cut]) and 0b1100_0000'u8) == 0b1000_0000'u8:
+    dec cut
+  text[0 ..< cut]
+
 proc defaultTierLadder*(): seq[Tier] =
   @[tierUnfiltered, tierUnfiltered, tierMedium, tierMedium, tierHard, tierHard]
 

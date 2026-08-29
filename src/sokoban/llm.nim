@@ -194,18 +194,22 @@ proc textOf*(
   if response.code < 200 or response.code >= 300:
     raise newException(LlmError, "anthropic error " & $response.code & ": " &
       response.body.truncateRunes(MaxFallbackDetailRunes))
-  var body = response.body
-  if body.len > MaxReplyBytes * 8:
-    body = body[0 ..< MaxReplyBytes * 8]
-  let payload = parseJson(body)
+  ## <= 8 x MaxReplyBytes of provider envelope is read before parsing, and the
+  ## cut lands on a RUNE boundary: a plain byte slice can split a codepoint,
+  ## and `std/json` does not validate UTF-8, so half a codepoint parses
+  ## happily and rides `say`/`notes` into the replay.
+  let payload = parseJson(response.body.truncateUtf8Bytes(MaxReplyBytes * 8))
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(LlmError, "anthropic refusal")
   for contentBlock in payload["content"]:
     if contentBlock{"type"}.getStr() == "text":
       result.add(contentBlock{"text"}.getStr())
-  # <= 4096 bytes read from the provider before parsing.
-  if result.len > MaxReplyBytes:
-    result = result[0 ..< MaxReplyBytes]
+  ## <= 4096 bytes read from the provider before parsing (the design note's
+  ## reply-schema cap), cut on a RUNE boundary for the same reason: every
+  ## string on this path reaches the replay through `say` and `notes`, and
+  ## `truncateRunes` downstream only shortens — it cannot repair a codepoint a
+  ## byte slice already broke.
+  result = result.truncateUtf8Bytes(MaxReplyBytes)
   result = result.rePrefix()
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(LlmError, "reply cut off at max_tokens before any " &
