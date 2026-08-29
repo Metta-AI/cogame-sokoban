@@ -192,6 +192,36 @@ jobs:
           SMOKE_REQUIRE_REPLAY_JSON: "0"
         run: ./tools/ci/docker_smoke.sh "${IMAGE}:ci"
 
+      # `reason == "fault"` is an unexpected exception inside the sim or the
+      # loop. The episode still settles and still writes its artifacts (that is
+      # the design note's fault rule), so docker_smoke.sh sees a well-formed
+      # results.json and passes - it prints the end reason and does not compare
+      # it. A faulting smoke must not go green, so the comparison lives here,
+      # in the workflow, rather than as a local edit to the shared
+      # tools/ci/docker_smoke.sh (which is byte-identical to coworld-builder's
+      # template apart from its three substituted placeholders, and is worth
+      # keeping that way). docker_smoke.sh copies results.json next to the
+      # replay it saves for the viewer job.
+      - name: Assert the smoke episode did not fault
+        run: |
+          set -euo pipefail
+          test -s dist/smoke/results.json || {
+            echo "::error::docker_smoke.sh saved no results.json"; exit 1; }
+          python3 - <<'PY'
+          import json, sys
+          results = json.load(open("dist/smoke/results.json"))
+          reason = results.get("reason") or results.get("end_reason")
+          rule = results.get("endRule")
+          print(f"smoke episode: reason={reason} endRule={rule} "
+                f"stopDetail={results.get('stopDetail')!r}")
+          if reason == "fault" or rule == "fault":
+              sys.exit("::error::the smoke episode FAULTED - an unexpected "
+                       "exception in the sim or the loop is a defect, not an "
+                       "acceptable end reason")
+          if reason not in ("complete", "deadline"):
+              sys.exit(f"::error::unexpected results.reason {reason!r}")
+          PY
+
       # The replay this episode produced is the ONLY replay in CI that is
       # known to be a real, current-format episode of this game. wasm-viewer
       # downloads it and loads it in a browser, so the viewer is tested
