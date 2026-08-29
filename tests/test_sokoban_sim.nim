@@ -529,6 +529,24 @@ suite "no floating point in the sim":
         check "float" notin code
         check "sqrt" notin code
         check not code.contains(".0")
+        # `/` too, which is the operator that would silently make an integer
+        # ratio a float. Two spellings are not arithmetic and are named here
+        # rather than ignored blindly: a module path in an `import`, and
+        # `os`'s path-join operator on the fallback-level directory. String
+        # literals are stripped first so a path inside quotes is not a match.
+        if trimmed.startsWith("import") or trimmed.startsWith("FallbackLevelDir /"):
+          continue
+        var bare = ""
+        var inString = false
+        var escaped = false
+        for ch in code:
+          if inString:
+            if escaped: escaped = false
+            elif ch == '\\': escaped = true
+            elif ch == '"': inString = false
+          elif ch == '"': inString = true
+          else: bare.add(ch)
+        check "/" notin bare
 
 suite "tick budget":
   test "a full episode of integer grid work is fast":
