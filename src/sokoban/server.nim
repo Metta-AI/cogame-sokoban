@@ -517,7 +517,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
     ## `src/ctf/server.nim:471-475`); the registration blob the shipped player
     ## sends carries no name at all, so without this `results.names` fell back
     ## to the POLICY LABEL for every episode.
-    let declaredName = request.queryParams.getOrDefault("name", "")
+    let declaredName = request.queryParams["name"]
       .strip().truncateRunes(MaxPolicyLabelRunes)
     let websocket = request.upgradeToWebSocket()
     withLock stateLock:
