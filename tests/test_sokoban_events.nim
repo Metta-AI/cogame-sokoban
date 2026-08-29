@@ -104,7 +104,7 @@ suite "the tier-2 analysis stream":
     # action trace for `cogamer-rl` and carries three of its eleven rows.
     let source = readFile("src/sokoban/server.nim")
     for kind in SimEventKind:
-      var identifier = "se" & $kind
+      let identifier = "se" & $kind
       check ("log.add(" & identifier & ",") in source
 
 suite "the fallback cause set is closed":
