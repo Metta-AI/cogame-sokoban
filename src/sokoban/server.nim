@@ -316,7 +316,7 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
         var directive = outcome.directive
         for record in outcome.records:
           writer.writeChat(gameSim.tick, record)
-          gameSim.feed.add(parseJson(record))
+          gameSim.noteChatRecord(parseJson(record))
         if directive.source == dsLlm:
           gameSim.seats[0].llmTurns.inc
         elif directive.source == dsFallback:

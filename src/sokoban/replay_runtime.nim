@@ -81,10 +81,8 @@ proc applyChat(sim: SimServer, record: string) =
     sim.events.add(%*{
       "k": "budget", "t": sim.tick, "turn": node{"turn"}.getInt(),
       "remaining_s": node{"remaining_s"}.getInt()})
-  of "fallback":
-    sim.feed.add(node)
-  of "directive":
-    sim.feed.add(node)
+  of "fallback", "directive":
+    sim.noteChatRecord(node)
   else:
     discard
 

@@ -107,6 +107,34 @@ suite "the tier-2 analysis stream":
       let identifier = "se" & $kind
       check ("log.add(" & identifier & ",") in source
 
+suite "the broadcast fallback event carries the real cause":
+  test "the cause comes from the turn's own fallback record, live and replayed":
+    let cfg = defaultConfig()
+    let sim = newSimServer(cfg)
+    sim.phase = phPlaying
+    sim.startLevel(levelsFor(cfg.seed, cfg)[0])
+    # The server writes the `fallback` chat record before the plan; the replay
+    # runtime applies the same record through the same proc.
+    sim.noteChatRecord(parseJson(
+      """{"k":"fallback","turn":1,"attempt":2,"cause":"timeout",""" &
+      """"detail":"provider timed out"}"""))
+    var directive = sim.scriptedDirective(blPusher)
+    directive.source = dsFallback
+    sim.beginTurn(directive)
+    var cause = ""
+    for event in sim.drainEvents():
+      if event{"k"}.getStr() == "fallback":
+        cause = event{"cause"}.getStr()
+    check cause == "timeout"
+    # And it does not leak into the next turn.
+    check sim.pendingFallbackCause == ""
+    sim.beginTurn(directive)
+    var second = ""
+    for event in sim.drainEvents():
+      if event{"k"}.getStr() == "fallback":
+        second = event{"cause"}.getStr()
+    check second == "fallback"
+
 suite "the fallback cause set is closed":
   test "every cause decide.nim can write is one of the seven declared":
     # `fallback.cause` is a CLOSED set in the design note; a cause outside it

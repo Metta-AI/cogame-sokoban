@@ -601,7 +601,10 @@
         skFeed(g.alias + ': \u201c' + e.text + '\u201d', 'say');
         return true;
       case 'fallback':
-        skFeed('MISSED THE CALL \u2014 pusher plan');
+        // The cause is what tells a spectator WHY the model lost the turn -
+        // a timeout reads very differently from a parse error.
+        skFeed('MISSED THE CALL \u2014 pusher plan' +
+          (e.cause && e.cause !== 'fallback' ? ' (' + e.cause + ')' : ''));
         return true;
       case 'deadlock':
         deadFlash = { x: e.x, y: e.y, t: (e.t === undefined ? s.t : e.t) };

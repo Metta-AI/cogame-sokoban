@@ -90,6 +90,12 @@ type
     macrosUnreachable*: int
     repliesRepaired*: int
 
+    pendingFallbackCause*: string
+      ## The cause of the fallback this turn's plan came from, taken from the
+      ## `fallback` chat record the same turn wrote. NOT hashed: it is
+      ## presentation only, and it is applied by the same proc live and at
+      ## playback so the broadcast stream is identical either way.
+
     reason*: EndReason
     endRule*: EndRule
     stopDetail*: string
@@ -183,6 +189,17 @@ proc gameHash*(sim: SimServer): uint64 = sim.gameHashValue
 proc emit(sim: SimServer, node: JsonNode) =
   node["t"] = %sim.tick
   sim.events.add(node)
+
+proc noteChatRecord*(sim: SimServer, node: JsonNode) =
+  ## The ONE place a replay chat record's non-hashed side effects are applied.
+  ## The live server and the replay runtime both call it, so the feed and the
+  ## derived events are the same stream whether the episode is being played or
+  ## re-derived.
+  if node.isNil or node.kind != JObject:
+    return
+  sim.feed.add(node)
+  if node{"k"}.getStr() == "fallback":
+    sim.pendingFallbackCause = node{"cause"}.getStr()
 
 proc drainEvents*(sim: SimServer): JsonNode =
   result = newJArray()
@@ -299,7 +316,15 @@ proc beginTurn*(sim: SimServer, directive: Directive) =
   if directive.say.len > 0:
     sim.emit(%*{"k": "say", "text": directive.say})
   if directive.source == dsFallback:
-    sim.emit(%*{"k": "fallback", "cause": "fallback"})
+    ## The REAL cause, not the literal string "fallback": the spectator feed
+    ## reads `MISSED THE CALL - pusher plan (timeout)`, and a constant here
+    ## made every fallback look alike. The cause comes from the `fallback`
+    ## chat record this turn already wrote, which `noteChatRecord` applies on
+    ## both paths, so live and replay agree.
+    sim.emit(%*{"k": "fallback", "cause": (
+      if sim.pendingFallbackCause.len > 0: sim.pendingFallbackCause
+      else: "fallback")})
+  sim.pendingFallbackCause = ""
 
 proc turnMovesLeft*(sim: SimServer): int =
   max(0, sim.config.turnMoves - sim.queueIndex)
