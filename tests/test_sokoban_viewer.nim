@@ -303,3 +303,15 @@ suite "the appended block draws the readouts the design names":
                    "CRATE PARKED", "SOLVED ", "MISSED THE CALL",
                    "crate-chip", "OF 4 PARKED"]:
       check anchor in gameBlock
+
+  test "a deadlock rings the offending crate and flashes it twice":
+    let bannerAt = page.find(BannerMarker)
+    let gameBlock = page[bannerAt .. ^1]
+    # Four readouts, not one: the ring and the two flashes on the inset, the
+    # #bannerlane call, the feed line and the scrubber beat.
+    check "deadFlash = { x: e.x, y: e.y" in gameBlock
+    check "FLASH_TICKS" in gameBlock
+    check "c.strokeStyle = '#e0523a'" in gameBlock
+    check "if (jumped) { deadFlash = null; }" in gameBlock
+    check "ctx.banner('DEADLOCK CREATED" in gameBlock
+    check ".beat-marker.deadlock" in gameBlock
