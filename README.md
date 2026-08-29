@@ -86,6 +86,23 @@ Tests run from the repo **root**:
 nim r --path:src tests/test_sokoban_sim.nim
 ```
 
+There is also a local browser gate for the chrome, because the wasm module
+needs emsdk and a page-level exception is invisible to `node --check`:
+
+```bash
+npm install --no-save playwright@1.55.0
+npx playwright@1.55.0 install chromium
+nim r --path:src tools/gen_wire_constants.nim > wire_constants.js
+node tools/ci/page_smoke.mjs /path/to/frame.json shot.png
+```
+
+It serves the shipped page with the wasm runtime stubbed, drives the page's own
+`onFrame` with one worst-case frame and fails on any thrown error. `ci.yml`'s
+`wasm-viewer` job is the real gate: it opens the built bundle against the replay
+`docker-smoke` produced, soaks it for ten seconds and runs
+`tools/ci/renderer_fixture.html` for the LLM-text path CI's own replay can never
+contain.
+
 `ci.yml` runs every `tests/*.nim` twice, debug and release. The generator is a
 bounded backward BFS, so the sweeps are sized from `SweepSeeds` in
 `tests/helpers.nim`: eight seeds in a release run, two in a debug one.

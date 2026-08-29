@@ -28,3 +28,7 @@ tests/test_sokoban_*
 !tests/test_sokoban_*.nim
 tools/tune_baselines
 tools/gen_wire_constants
+wire_constants.js
+viewer-smoke.png
+viewer-smoke.json
+fixture-evidence/

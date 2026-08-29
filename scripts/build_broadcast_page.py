@@ -103,6 +103,13 @@ def main():
 """, 1)
     page = swap(page, "  $('povBadge').addEventListener('click', "
                 "function () { send('v:-1'); });\n", "", 1)
+
+    # The board is a FIXED 10 x 10 grid with no off-frame area, so there is
+    # nothing to zoom into and nothing to pan across: the z/x/0 and arrow keys
+    # go with the #viewpanel wiring that owned ZOOM_STEP and panCellBoardPx.
+    page = cut(page, "    // Board zoom rides z/x/0",
+               "    else if (k >= '1' && k <= '9') send(k);",
+               "board zoom + pan keys", inclusive_end=False)
     page = cut(page, "  // ---- view controls: zoom cluster + minimap",
                "  canvas.addEventListener('dblclick', function (ev) {",
                "zoom bar + minimap wiring", inclusive_end=False)
@@ -141,7 +148,11 @@ def main():
     # block both resolve their assets through it, and it is the ONE place that
     # maps the page's three delivery routes.
     page = cut(page, "  var COG_ART = {}, COG_ART_GUN = {};",
-               "  // ---- pre-load curtain: the bot locker room", "eye-level billboard art",
+               "  // The front masters are trimmed to their opaque box",
+               "eye-level billboard art", inclusive_end=False)
+    page = cut(page, "  // The front masters are trimmed to their opaque box",
+               "  // Engine-authoritative wire constants (read via the shared "
+               "chrome;", "billboard trim + depth-dim scratch",
                inclusive_end=False)
     page = swap(page, "window.CtfStaticReplay", "window.SokobanStaticReplay")
     # One cog, and it is red: the blue/green/yellow locker-room webps are not

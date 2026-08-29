@@ -111,19 +111,39 @@
 }
 .sk-pip.outofsteps { background: var(--ghost); border-color: var(--ghost); }
 .sk-pip .sk-pipcap {
+  /* One letter, centred under its own pip: the full tier name lives in the
+     pip's title, because six names side by side collide at every width. */
   position: absolute;
   top: 100%;
   left: 50%;
-  transform: translateX(-50%);
+  width: calc(14 * var(--u));
+  margin-left: calc(-7 * var(--u));
+  text-align: center;
   font-size: calc(7 * var(--u));
+  line-height: 1.6;
   color: var(--paper-dim);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
 /* ---- the dead-square inset (the repurposed #fpv panel) ---------------- */
 #fpv.sk-on { display: block; aspect-ratio: 1 / 1; }
 #fpv-canvas { width: 100%; height: 100%; display: block; }
+
+/* ---- the endcard table --------------------------------------------------- */
+/* Five columns of this game's own widths: the inherited grid was sized for
+   Player | K | D | Clstr | Cap and squeezes Level | Tier | Result | Moves |
+   Crates into an unreadable overlap. */
+#endcard .ec-thead,
+#endcard .ec-row {
+  grid-template-columns: calc(34 * var(--u)) 1fr calc(58 * var(--u))
+    calc(34 * var(--u)) calc(30 * var(--u));
+}
+#endcard .ec-row .n { text-align: right; }
+#endcard .ec-row .n:nth-child(2),
+#endcard .ec-row .n:nth-child(3) { text-align: left; }
+#stage.tiny #endcard .ec-thead,
+#stage.tiny #endcard .ec-row { font-size: calc(8 * var(--u)); }
 
 /* ---- scrubber beats: one rule per kind the sim emits, and no others ---- */
 .beat-marker {
@@ -162,13 +182,36 @@
 #stage.tiny .plate .avatar { width: calc(10 * var(--u)); height: calc(10 * var(--u)); }
 #stage.tiny .sk-fallback { margin-left: calc(2 * var(--u)); font-size: calc(9 * var(--u)); }
 #stage.tiny #sk-ribbon {
+  /* Two lines at 9 px with the full string in `title`, and never wider than
+     half the (already letterboxed) stage: at 360 px the board is 120 px square
+     and anything wider would cross it. */
   font-size: calc(9 * var(--u));
-  max-width: 54%;
-  line-height: 1.25;
+  max-width: 52%;
+  line-height: 1.2;
+  padding: calc(2 * var(--u)) calc(4 * var(--u));
+  left: calc(4 * var(--u));
+  /* Out of #bannerlane's way: at this density the top of the board belongs to
+     the level announcement, so the ribbon moves under it, above the inset. */
+  top: auto;
+  bottom: calc(var(--band, 0px) + 124 * var(--u));
 }
-#stage.tiny #sk-pips { top: calc(var(--topband, 0px) + 44 * var(--u)); gap: calc(3 * var(--u)); }
-#stage.tiny .sk-pip { width: calc(12 * var(--u)) !important; height: calc(12 * var(--u)) !important; }
+#stage.tiny #sk-pips {
+  top: auto;
+  bottom: calc(var(--band, 0px) + 112 * var(--u));
+  left: calc(4 * var(--u));
+  gap: calc(3 * var(--u));
+}
+#stage.tiny .sk-pip {
+  width: calc(9 * var(--u)) !important;
+  height: calc(9 * var(--u)) !important;
+}
+/* Under .tiny the tier letters go to tooltips: six captions cannot be read at
+   a 9 px pip. */
 #stage.tiny .sk-pip .sk-pipcap { display: none; }
+#stage.tiny .plate .lives-num { font-size: calc(13 * var(--u)); }
+#stage.tiny .plate .crates { margin-right: calc(3 * var(--u)); }
+#stage.tiny .crate-chip { width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
+#stage.tiny #fpv { left: calc(4 * var(--u)); bottom: calc(30 * var(--u)); }
 #stage.tiny #fpv {
   width: calc(84 * var(--u)) !important;
   height: calc(84 * var(--u)) !important;
@@ -251,10 +294,15 @@
       name.textContent = g.name || 'COG';
       name.title = g.name || '';
     }
+    // A seven-digit score is wider than a 360 px plate column, so at .tiny the
+    // numeral is the solve count and the score stays in the clock caption.
+    var tiny = document.getElementById('stage').classList.contains('tiny');
     var num = skEl('lives-red');
-    if (num) num.textContent = String(g.score);
+    if (num) {
+      num.textContent = tiny ? g.solved + '/' + g.level.of : String(g.score);
+    }
     var label = document.querySelector('#plates-l .solved-label');
-    if (label) label.textContent = 'Score';
+    if (label) label.textContent = tiny ? 'Solved' : 'Score';
     var chips = skEl('flag-red');
     if (chips) {
       var alias = chips.parentElement &&
@@ -338,7 +386,7 @@
       node.title = 'Level ' + (k + 1) + ' \u00b7 ' +
         (TIER_LABEL[lv.tier] || '') + ' \u00b7 ' +
         (lv.outcome === 'running' ? 'in play' : lv.outcome);
-      node.firstChild.textContent = (TIER_LABEL[lv.tier] || '').slice(0, 4);
+      node.firstChild.textContent = (TIER_LABEL[lv.tier] || '?').charAt(0);
     }
   }
 
@@ -466,8 +514,16 @@
   // ---- the match feed ----------------------------------------------------
   // Plain language, never internal notation. Routed through the inherited
   // pushFeed so the feed queue, its cap and its styling stay the starter's.
+  // The inherited `pushFeed` takes a NODE, not a string — a signature drift
+  // here is exactly what latched static_replay.js into `failed` mid-replay on
+  // cogball 0.1.4, so the row is built the way the starter's own callers build
+  // it and handed over unchanged.
   function skFeed(text, cls) {
-    if (ctx && ctx.pushFeed) ctx.pushFeed(text, cls || '');
+    if (!ctx || !ctx.pushFeed) return;
+    var row = document.createElement('div');
+    row.className = 'feed-row' + (cls ? ' ' + cls : '');
+    row.innerHTML = '<span class="who">' + skEscape(text) + '</span>';
+    ctx.pushFeed(row);
   }
 
   function skOnEvent(e, s) {
