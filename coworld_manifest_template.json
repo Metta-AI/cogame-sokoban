@@ -1,0 +1,322 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/metta/main/packages/coworld/src/coworld/coworld_manifest_schema.json",
+  "tags": ["sokoban", "single-agent", "planning", "puzzle", "irreversible"],
+  "episode_timeout_minutes": 20,
+  "game": {
+    "name": "sokoban",
+    "owner": "daveey@softmax.com",
+    "description": "SA Sokoban: one cog alone in a 10x10 walled room with four crates and four marked squares. It can walk, and when it walks into a crate the crate slides one square ahead of it. It can NEVER pull. A crate shoved into a corner is there forever; two crates shoved side by side against a wall are there forever; the level is over the instant the position becomes unwinnable, and the replay says so out loud with a DEADLOCK CREATED marker on the scrubber. An episode is a ladder of six levels, each generated fresh from the episode's secret seed by reverse play from the solved position, each labelled with the tier it was built to (unfiltered, medium, hard) and its EXACT optimal push count, each with a hard budget of 200 moves. Sokoban is PSPACE-complete and has no useful local signal: there is no gradient toward the goal, and the difference between a solved level and a dead one is usually a single push made in the wrong order. The league reads one number: the tier-weighted count of levels solved, with crates parked as the tie-break and moves saved as the tie-break after that.",
+    "replay_viewer": {"bundle": "static-replay-viewer"},
+    "runnable": {
+      "type": "game",
+      "image": "{{SOKOBAN_IMAGE}}",
+      "run": ["/bin/sokoban"],
+      "source_url": "https://github.com/Metta-AI/cogame-sokoban/tree/main",
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/sokoban/anthropic_api_key"
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "uri",
+        "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/docs/PROTOCOL.md"
+      },
+      "global": {
+        "type": "uri",
+        "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/docs/PROTOCOL.md"
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "uri",
+        "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/README.md"
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "Rules",
+          "content": {
+            "type": "uri",
+            "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/docs/RULES.md"
+          }
+        },
+        {
+          "id": "actions.md",
+          "title": "Actions and the reply format",
+          "content": {
+            "type": "uri",
+            "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/docs/ACTIONS.md"
+          }
+        },
+        {
+          "id": "levels.md",
+          "title": "Where the levels come from",
+          "content": {
+            "type": "uri",
+            "value": "https://github.com/Metta-AI/cogame-sokoban/blob/main/docs/LEVELS.md"
+          }
+        }
+      ]
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tokens", "players"],
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "description": "Per-seat player tokens. RUNNER-INJECTED: never present in a variant's game_config.",
+          "items": {"type": "string"},
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "players": {
+          "type": "array",
+          "description": "One entry per seat; `name` is the seat's in-game alias.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {"name": {"type": "string"}}
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "slots": {
+          "type": "array",
+          "description": "Optional seat ordering supplied by the runner.",
+          "items": {"type": "integer"},
+          "minItems": 0,
+          "maxItems": 1
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Episode seed. Randomised by the runner and never shown to the seat; every level is a pure function of (seed, levelIndex, tier)."
+        },
+        "num_agents": {
+          "type": "integer",
+          "description": "Seats. Sokoban is a solitaire puzzle: always exactly one.",
+          "minimum": 1,
+          "maximum": 1,
+          "default": 1
+        },
+        "minPlayers": {"type": "integer", "minimum": 1, "maximum": 1},
+        "gridSize": {"type": "integer", "minimum": 10, "maximum": 10},
+        "boxCount": {"type": "integer", "minimum": 4, "maximum": 4},
+        "levelCount": {"type": "integer", "minimum": 1, "maximum": 12},
+        "tierLadder": {
+          "type": "array",
+          "description": "The tier of each level, in play order.",
+          "items": {"type": "string", "enum": ["unfiltered", "medium", "hard"]},
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "turnMoves": {"type": "integer", "minimum": 1, "maximum": 40},
+        "levelTurnCap": {"type": "integer", "minimum": 1, "maximum": 40},
+        "stepBudget": {"type": "integer", "minimum": 1, "maximum": 1600},
+        "maxTurns": {"type": "integer", "minimum": 1, "maximum": 480},
+        "maxTicks": {"type": "integer", "minimum": 1, "maximum": 9600},
+        "parWeight": {"type": "integer", "minimum": 0, "maximum": 36},
+        "maxActionsPerTurn": {"type": "integer", "minimum": 1, "maximum": 16},
+        "macroPrimitiveCap": {"type": "integer", "minimum": 1, "maximum": 128},
+        "genNodeCap": {"type": "integer", "minimum": 1000, "maximum": 2000000},
+        "genAttemptCap": {"type": "integer", "minimum": 1, "maximum": 32},
+        "baselineNodeCap": {
+          "type": "integer",
+          "description": "The pusher baseline's best-first expansion bound. The shipped value is the pick of tools/tune_baselines.mim's sweep, recorded in tools/ci/baseline_tuning.json: an unbounded search solves essentially every level, which would ship a superhuman filler.",
+          "minimum": 1,
+          "maximum": 200000
+        },
+        "attempt1Ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+        "retryMs": {"type": "integer", "minimum": 0, "maximum": 60000},
+        "turnBudgetMs": {"type": "integer", "minimum": 0, "maximum": 120000},
+        "turnSpacingMs": {"type": "integer", "minimum": 0, "maximum": 60000},
+        "wallClockBudgetSeconds": {"type": "integer", "minimum": 1, "maximum": 690},
+        "lobbyJoinTimeoutTicks": {"type": "integer", "minimum": 1, "maximum": 4800},
+        "gameOverTicks": {"type": "integer", "minimum": 0, "maximum": 480},
+        "fastMode": {"type": "boolean"},
+        "showPlayerLabels": {"type": "boolean"},
+        "model": {"type": "string"},
+        "maxOutputTokens": {"type": "integer", "minimum": 1, "maximum": 8192}
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "names": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1},
+        "aliases": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1},
+        "scores": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 1},
+        "win": {"type": "array", "items": {"type": "boolean"}, "minItems": 1, "maxItems": 1},
+        "winner": {"type": ["integer", "null"]},
+        "reason": {"type": "string", "enum": ["complete", "deadline", "fault"]},
+        "endRule": {"type": "string", "enum": ["ladderComplete", "turnCap", "wallClock", "fault"]},
+        "variant": {"type": "string"},
+        "seed": {"type": "integer"},
+        "levelCount": {"type": "integer"},
+        "stepBudget": {"type": "integer"},
+        "parWeight": {"type": "integer"},
+        "maxWeight": {"type": "integer"},
+        "solvedWeight": {"type": "integer"},
+        "levelsSolved": {"type": "integer"},
+        "boxCredit": {"type": "integer"},
+        "movesSavedTotal": {"type": "integer"},
+        "levelTier": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["unfiltered", "medium", "hard"]},
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "levelOptPushes": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 12},
+        "levelOutcome": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["solved", "deadlocked", "outofsteps", "unreached"]},
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "levelBoxesPlaced": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 12},
+        "levelMoves": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 12},
+        "levelTurns": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 12},
+        "levelPushes": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 12},
+        "levelTierRelaxed": {"type": "array", "items": {"type": "boolean"}, "minItems": 1, "maxItems": 12},
+        "deadlocks": {"type": "integer"},
+        "outOfSteps": {"type": "integer"},
+        "pushesTotal": {"type": "integer"},
+        "blockedMoves": {"type": "integer"},
+        "actionsDropped": {"type": "integer"},
+        "macrosUnreachable": {"type": "integer"},
+        "repliesRepaired": {"type": "integer"},
+        "finalTick": {"type": "integer"},
+        "turnsPlayed": {"type": "integer"},
+        "policyKinds": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 1},
+        "llmTurns": {"type": "integer"},
+        "fallbackTurns": {"type": "integer"},
+        "deadSeats": {"type": "array", "items": {"type": "boolean"}, "minItems": 1, "maxItems": 1},
+        "stopDetail": {"type": "string"}
+      }
+    }
+  },
+  "player": [
+    {
+      "id": "pusher",
+      "type": "player",
+      "name": "pusher",
+      "description": "The reference Sokoban policy: a bounded best-first search over push space that prunes every deadlocking successor, matches crates to marked squares greedily and re-plans from scratch every turn. Same image as the game, selected with PLAYER_SCRIPTED=pusher.",
+      "image": "{{SOKOBAN_IMAGE}}",
+      "run": ["/bin/sokoban-player"],
+      "source_url": "https://github.com/Metta-AI/cogame-sokoban/tree/main",
+      "env": {"PLAYER_SCRIPTED": "pusher", "PLAYER_POLICY_LABEL": "pusher"},
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "1"}
+      }
+    }
+  ],
+  "variants": [
+    {
+      "id": "ladder",
+      "name": "Tier ladder (1 cog, 6 Sokoban levels)",
+      "description": "Six freshly generated 10x10 Sokoban levels, four crates each, walked up the three Boxoban tiers: two unfiltered, two medium, two hard. Crates can only be pushed, never pulled, so one crate shoved into a corner ends the level on the spot. Two hundred moves a level. Score is levels solved, weighted 1/2/3 by tier.",
+      "game_config": {
+        "players": [{"name": "Alpha"}],
+        "num_agents": 1,
+        "minPlayers": 1,
+        "gridSize": 10,
+        "boxCount": 4,
+        "levelCount": 6,
+        "tierLadder": ["unfiltered", "unfiltered", "medium", "medium", "hard", "hard"],
+        "turnMoves": 20,
+        "levelTurnCap": 10,
+        "stepBudget": 200,
+        "maxTurns": 60,
+        "maxTicks": 1200,
+        "parWeight": 5,
+        "maxActionsPerTurn": 8,
+        "macroPrimitiveCap": 32,
+        "genNodeCap": 200000,
+        "genAttemptCap": 8,
+        "baselineNodeCap": 8,
+        "attempt1Ms": 6000,
+        "retryMs": 3000,
+        "turnBudgetMs": 9000,
+        "turnSpacingMs": 2600,
+        "wallClockBudgetSeconds": 690,
+        "lobbyJoinTimeoutTicks": 2400,
+        "gameOverTicks": 96,
+        "fastMode": true,
+        "showPlayerLabels": false,
+        "maxOutputTokens": 900
+      }
+    },
+    {
+      "id": "hard",
+      "name": "Hard ladder (1 cog, 6 levels, four of them hard)",
+      "description": "The same six-level format with the easy tier removed: two medium levels and then four hard ones, each solvable in 23 to 34 pushes and each one bad shove from dead. This is where a searching baseline stops scoring and a planning policy separates.",
+      "game_config": {
+        "players": [{"name": "Alpha"}],
+        "num_agents": 1,
+        "minPlayers": 1,
+        "gridSize": 10,
+        "boxCount": 4,
+        "levelCount": 6,
+        "tierLadder": ["medium", "medium", "hard", "hard", "hard", "hard"],
+        "turnMoves": 20,
+        "levelTurnCap": 10,
+        "stepBudget": 200,
+        "maxTurns": 60,
+        "maxTicks": 1200,
+        "parWeight": 6,
+        "maxActionsPerTurn": 8,
+        "macroPrimitiveCap": 32,
+        "genNodeCap": 200000,
+        "genAttemptCap": 8,
+        "baselineNodeCap": 8,
+        "attempt1Ms": 6000,
+        "retryMs": 3000,
+        "turnBudgetMs": 9000,
+        "turnSpacingMs": 2600,
+        "wallClockBudgetSeconds": 690,
+        "lobbyJoinTimeoutTicks": 2400,
+        "gameOverTicks": 96,
+        "fastMode": true,
+        "showPlayerLabels": false,
+        "maxOutputTokens": 900
+      }
+    }
+  ],
+  "certification": {
+    "players": [{"player_id": "pusher"}],
+    "game_config": {
+      "players": [{"name": "Alpha"}],
+      "num_agents": 1,
+      "minPlayers": 1,
+      "seed": 42,
+      "gridSize": 10,
+      "boxCount": 4,
+      "levelCount": 6,
+      "tierLadder": ["unfiltered", "unfiltered", "medium", "medium", "hard", "hard"],
+      "turnMoves": 20,
+      "levelTurnCap": 10,
+      "stepBudget": 200,
+      "maxTurns": 60,
+      "maxTicks": 1200,
+      "parWeight": 5,
+      "maxActionsPerTurn": 8,
+      "macroPrimitiveCap": 32,
+      "genNodeCap": 200000,
+      "genAttemptCap": 8,
+      "baselineNodeCap": 8,
+      "attempt1Ms": 6000,
+      "retryMs": 3000,
+      "turnBudgetMs": 9000,
+      "turnSpacingMs": 0,
+      "wallClockBudgetSeconds": 240,
+      "lobbyJoinTimeoutTicks": 600,
+      "gameOverTicks": 96,
+      "fastMode": true,
+      "showPlayerLabels": false,
+      "maxOutputTokens": 900
+    }
+  }
+}

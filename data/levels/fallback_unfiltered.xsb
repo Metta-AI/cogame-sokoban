@@ -1,0 +1,12 @@
+; sokoban fallback level - tier unfiltered
+; optPushes = 6
+##########
+#  #    .#
+#       $#
+#$  @ .# #
+#   # $  #
+#. $ .  ##
+#    #   #
+#   #    #
+#  #     #
+##########

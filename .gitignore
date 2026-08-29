@@ -1,0 +1,30 @@
+# Ignore files with no extension, then re-include the ones we ship.
+*
+!*/
+!*.*
+!LICENSE
+!Dockerfile
+!Dockerfile.replay-viewer
+
+# Hidden files, but not the CI workflows or these two dotfiles.
+.*
+!.github/
+!.github/**
+!.gitignore
+!.dockerignore
+
+# The committed nim.cfg would pin the AUTHOR's package paths and is wrong on
+# every other host: CI and the Dockerfile regenerate it from ~/.nimby/pkgs.
+nim.cfg
+nimcache
+*.exe
+*.out
+out/
+tmp/
+build/
+dist/
+replay-viewer/dist/
+tests/test_sokoban_*
+!tests/test_sokoban_*.nim
+tools/tune_baselines
+tools/gen_wire_constants

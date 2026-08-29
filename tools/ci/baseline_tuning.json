@@ -1,0 +1,17 @@
+{
+  "sweptAt": "tools/tune_baselines.nim",
+  "seeds": 40,
+  "nodeCap": 8,
+  "greedyMatch": true,
+  "tieOnH": false,
+  "pusherSolveRate": {
+    "unfiltered": 0.6875,
+    "medium": 0.375,
+    "hard": 0.0625
+  },
+  "nudgerSolveRate": {
+    "unfiltered": 0.4,
+    "medium": 0.0,
+    "hard": 0.0
+  }
+}

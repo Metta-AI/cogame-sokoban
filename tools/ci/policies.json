@@ -1,0 +1,35 @@
+[
+  {
+    "name": "sokoban-lookahead",
+    "run": "/bin/sokoban-player",
+    "env": {
+      "PLAYER_PROMPT": "Simulate before you commit. Never push a crate you have not first checked\nthree ways.\nBefore your FIRST action on a level, spend the whole turn planning and send\nzero or one action. Write in \"notes\", in this order:\n1. the four crates and, for each, which marked square you intend it for -\n   match them so no two paths cross;\n2. the crates that are ALREADY safe (on a marked square, or in a corridor\n   where only one push direction exists);\n3. the crates that are one bad push from death - name the exact forbidden\n   push, e.g. \"box0 D is dead: (4,7) is not a target and row 7 has none\".\nThen, every turn, for each push you are about to send, check all three:\n  a. is the landing square in dead_squares? If yes, never.\n  b. after this push, would the crate sit in a 2x2 block of wall-or-crate?\n     Walk the four 2x2 blocks that contain the landing square. If yes, never.\n  c. after this push, can you still walk round to the OTHER sides of this\n     crate you will need later? If the push seals you out, do it last, not\n     first.\nPush the crates that can only be finished from one side FIRST, and the crates\nyou can approach from anywhere LAST. That ordering is what Sokoban is.\nPrefer \"push\" over \"moves\": \"push\" walks you to the right square for free and\nnever wastes moves on pathfinding you got wrong. Use \"moves\" only for a\none-square adjustment.\nIf \"last_turn\" says blocked > 0 you pushed into something solid - re-read\n\"pushes_available\" and stop guessing. If it says unreachable, the square you\nmust stand on is walled off or crate-blocked; clear a path first.\nIf opt_pushes is 17 and you have made 30 pushes, you are lost - stop pushing\nand park whatever crates you can still reach on marked squares, because\ncrates parked is the tie-break.",
+      "PLAYER_POLICY_LABEL": "lookahead"
+    }
+  },
+  {
+    "name": "sokoban-orderfirst",
+    "run": "/bin/sokoban-player",
+    "env": {
+      "PLAYER_PROMPT": "Solve the ORDER, then execute it without improvising.\nTurn 1 of every level: pick a permutation of the four crates and an assignment\nof crates to marked squares, and say it out loud in \"say\" - \"3 to (7,7), 1 to\n(7,4), then 2 and 0 on the left\". Put the full order in \"notes\" and DO NOT\nchange it unless a push you planned turns out illegal.\nChoose the order by these rules, in priority order:\n1. A crate already on a marked square is finished. Never touch it again, and\n   never route yourself through the square behind it.\n2. Crates whose target is against a wall or in a corner go FIRST, while the\n   room is still empty - you will not be able to get behind them later.\n3. Crates nearest to you, and crates you can push in a straight line with no\n   turns, go next: they are cheap and they open the floor.\n4. The crate in the middle of the room goes LAST. It has the most push\n   directions available, so it is the one that survives the room filling up.\nExecute one crate per turn where you can: a single {\"do\":\"push\",\"box\":i,\n\"dir\":d,\"times\":n} with the largest n that is still safe, then stop. Twenty\nmoves a turn is plenty for one crate and it keeps every turn checkable.\nTwo hard bans, no exceptions: never push a crate onto a dead_square, and never\ncreate a 2x2 of wall-or-crate containing an unparked crate. If your planned\npush would do either, the ORDER was wrong - re-plan the whole order this turn\nand say so.\nWhen only one crate is left, count: moves_left must exceed the walking\ndistance plus the pushes. If it does not, you are out of time; spend the rest\nparking nothing and simply stop pushing, because a deadlock and a timeout\nscore the same but a wrong push can undo a crate you already parked.",
+      "PLAYER_POLICY_LABEL": "orderfirst"
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "sokoban-pusher",
+    "run": "/bin/sokoban-player",
+    "env": {
+      "PLAYER_SCRIPTED": "pusher",
+      "PLAYER_POLICY_LABEL": "pusher"
+    }
+  },
+  {
+    "name": "sokoban-nudger",
+    "run": "/bin/sokoban-player",
+    "env": {
+      "PLAYER_SCRIPTED": "nudger",
+      "PLAYER_POLICY_LABEL": "nudger"
+    }
+  }
+]

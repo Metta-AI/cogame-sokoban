@@ -1,0 +1,12 @@
+; sokoban fallback level - tier hard
+; optPushes = 23
+##########
+#    .   #
+#  .     #
+# #     ##
+# .     .#
+#   $  $ #
+#    # # #
+#  $$##  #
+#  # @#  #
+##########

@@ -1,0 +1,8 @@
+services:
+  sokoban:
+    image: coworld-sokoban:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host

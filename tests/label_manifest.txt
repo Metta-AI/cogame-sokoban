@@ -1,0 +1,13 @@
+# The board-label vocabulary contract.
+#
+# Every string src/sokoban/labels.nim can draw ON THE BOARD, one per line.
+# tests/test_sokoban_events.nim asserts the emitted set equals this file, so a
+# label change must be regenerated in the same commit. showPlayerLabels is
+# false, so no real policy name can ever appear here: the in-game alias is the
+# only name the board carries.
+ALPHA
+D
+DEAD SQUARES
+L
+R
+U

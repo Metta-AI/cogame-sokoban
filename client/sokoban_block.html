@@ -1,0 +1,570 @@
+<!-- ============================================================
+     SOKOBAN additions to the inherited coworld-ctf chrome
+     ============================================================
+     Everything above this banner is the starter's broadcast page. It is not a
+     lookalike and it is not a rewrite: it is coworld-ctf's own page with the
+     elements the design note lists as removed cut out (the #viewpanel zoom bar
+     and minimap, the POV badge, the raycast first-person pipeline, the hp/gear
+     HUD and its inset map) and the spectator vocabulary re-mapped. Everything
+     THIS game adds lives below, and it is installed through the starter's own
+     splice hook: window.PaintballChrome, renamed window.SokobanChrome, with
+     install(ctx) / frame(s, ctx, jumped) / event(e, s, ctx) keeping the same
+     signatures.
+
+     Nothing here touches the transport band. relayout() still owns --hudscale,
+     --topband and --band on :root; the endcard still stops at
+     bottom: var(--band, 0px) and is still dismissed by every seek; and every
+     scrubber beat this block draws is a LABELLED, CLICKABLE BUTTON that seeks
+     on click, styled for EVERY kind the sim emits and no others - levelstart,
+     boxon, deadlock, solved, failed, fallback and end. The builder carries an
+     sk- prefix precisely so it can never be shadowed by the chrome alias block
+     (var markBeat = C.markBeat hoists over a same-named function declaration;
+     the tandem 2026-08-23 trap).
+     ============================================================ -->
+<style>
+/* ---- the one scorebug plate ------------------------------------------- */
+/* The embedded featured-match iframe is ~360 px wide, so a policy name must
+   shrink rather than collapse to an ellipsis of nothing. */
+.plate-name {
+  flex: 1 1 auto;
+  min-width: 3.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plate .crates {
+  display: inline-flex;
+  gap: calc(2 * var(--u));
+  align-items: center;
+  margin-right: calc(6 * var(--u));
+}
+.crate-chip {
+  width: calc(9 * var(--u));
+  height: calc(9 * var(--u));
+  border: 1px solid rgba(242, 232, 216, 0.45);
+  background: rgba(242, 232, 216, 0.08);
+  border-radius: 1px;
+}
+.crate-chip.on {
+  background: var(--crate-col, #e8a33d);
+  border-color: var(--crate-col, #e8a33d);
+}
+.sk-fallback {
+  color: var(--amber);
+  font-weight: 700;
+  margin-left: calc(4 * var(--u));
+}
+.sk-alias {
+  color: var(--ghost);
+  font-size: calc(9 * var(--u));
+  letter-spacing: 0.08em;
+  margin-right: calc(4 * var(--u));
+}
+
+/* ---- level ribbon + pips (board region, top-left, never the band) ------ */
+#sk-ribbon {
+  position: absolute;
+  left: calc(12 * var(--u));
+  top: calc(var(--topband, 0px) + 10 * var(--u));
+  z-index: 9;
+  padding: calc(4 * var(--u)) calc(8 * var(--u));
+  background: rgba(12, 9, 6, 0.56);
+  box-shadow: 0 0 0 1px rgba(232, 163, 61, 0.28);
+  color: var(--paper);
+  font-size: calc(11 * var(--u));
+  letter-spacing: 0.06em;
+  line-height: 1.35;
+  pointer-events: none;
+  max-width: 62%;
+}
+#sk-ribbon .sk-sub { color: var(--paper-dim); font-size: calc(10 * var(--u)); }
+#sk-pips {
+  position: absolute;
+  left: calc(12 * var(--u));
+  top: calc(var(--topband, 0px) + 52 * var(--u));
+  z-index: 9;
+  display: flex;
+  gap: calc(5 * var(--u));
+  align-items: flex-end;
+  pointer-events: none;
+}
+.sk-pip {
+  display: block;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 232, 216, 0.5);
+  background: transparent;
+  position: relative;
+}
+.sk-pip.t-unfiltered { width: calc(9 * var(--u)); height: calc(9 * var(--u)); }
+.sk-pip.t-medium { width: calc(12 * var(--u)); height: calc(12 * var(--u)); }
+.sk-pip.t-hard { width: calc(15 * var(--u)); height: calc(15 * var(--u)); }
+.sk-pip.cur { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(232, 163, 61, 0.35); }
+.sk-pip.solved { background: var(--green); border-color: var(--green); }
+.sk-pip.deadlocked { background: var(--red); border-color: var(--red); }
+.sk-pip.deadlocked::after {
+  content: '';
+  position: absolute;
+  left: 10%; right: 10%; top: 45%;
+  height: 2px;
+  background: var(--paper);
+  transform: rotate(-45deg);
+}
+.sk-pip.outofsteps { background: var(--ghost); border-color: var(--ghost); }
+.sk-pip .sk-pipcap {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: calc(7 * var(--u));
+  color: var(--paper-dim);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+/* ---- the dead-square inset (the repurposed #fpv panel) ---------------- */
+#fpv.sk-on { display: block; aspect-ratio: 1 / 1; }
+#fpv-canvas { width: 100%; height: 100%; display: block; }
+
+/* ---- scrubber beats: one rule per kind the sim emits, and no others ---- */
+.beat-marker {
+  position: absolute;
+  bottom: 0;
+  width: calc(3 * var(--u));
+  height: calc(11 * var(--u));
+  margin-left: calc(-1.5 * var(--u));
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  cursor: pointer;
+  z-index: 4;
+}
+.beat-marker.levelstart { background: rgba(242, 232, 216, 0.62); height: calc(9 * var(--u)); }
+.beat-marker.boxon { background: var(--green); height: calc(8 * var(--u)); }
+.beat-marker.solved { background: var(--green); height: calc(13 * var(--u)); width: calc(4 * var(--u)); }
+.beat-marker.failed { background: var(--ghost); height: calc(10 * var(--u)); }
+.beat-marker.fallback { background: var(--amber); height: calc(8 * var(--u)); }
+.beat-marker.end { background: var(--paper); height: calc(14 * var(--u)); width: calc(4 * var(--u)); }
+/* The moment the spectator came for: the tallest, reddest marker on the bar. */
+.beat-marker.deadlock {
+  background: var(--red);
+  height: calc(18 * var(--u));
+  width: calc(5 * var(--u));
+  box-shadow: 0 0 calc(6 * var(--u)) rgba(224, 82, 58, 0.9);
+}
+
+/* ---- legible at 360 px ------------------------------------------------- */
+/* relayout() toggles #stage.tiny at boardW <= 620 and clamps --hudscale to
+   [0.5, 1.6]; both are the starter's, kept verbatim. These five rules are
+   this game's own additions on top of them. */
+#stage.tiny .sk-alias,
+#stage.tiny .solved-label,
+#stage.tiny .fl-cap { display: none; }
+#stage.tiny .plate .avatar { width: calc(10 * var(--u)); height: calc(10 * var(--u)); }
+#stage.tiny .sk-fallback { margin-left: calc(2 * var(--u)); font-size: calc(9 * var(--u)); }
+#stage.tiny #sk-ribbon {
+  font-size: calc(9 * var(--u));
+  max-width: 54%;
+  line-height: 1.25;
+}
+#stage.tiny #sk-pips { top: calc(var(--topband, 0px) + 44 * var(--u)); gap: calc(3 * var(--u)); }
+#stage.tiny .sk-pip { width: calc(12 * var(--u)) !important; height: calc(12 * var(--u)) !important; }
+#stage.tiny .sk-pip .sk-pipcap { display: none; }
+#stage.tiny #fpv {
+  width: calc(84 * var(--u)) !important;
+  height: calc(84 * var(--u)) !important;
+  min-width: 0;
+  max-width: none;
+}
+#stage.tiny #fpv-grip { display: none; }
+@media (max-width: 640px) {
+  .solved-label, .sk-alias, .fl-cap { display: none; }
+}
+</style>
+<script>
+(function () {
+  'use strict';
+  // The dead-square hatch is drawn at a HIGHER-CONTRAST alpha under .tiny: a
+  // 12 px cell cannot carry a subtle wash.
+  var HATCH_ALPHA = 0.18, HATCH_ALPHA_TINY = 0.26;
+  var TIER_LABEL = { unfiltered: 'UNFILTERED', medium: 'MEDIUM', hard: 'HARD' };
+
+  var ctx = null;
+  var beatsDrawn = false;
+  var lastFeedTick = -1;
+
+  function skEl(id) { return document.getElementById(id); }
+
+  function skEnsureNodes() {
+    var stage = skEl('stage');
+    if (!stage || skEl('sk-ribbon')) return;
+    var ribbon = document.createElement('div');
+    ribbon.id = 'sk-ribbon';
+    ribbon.innerHTML = '<div class="sk-main">LEVEL 1/6</div>' +
+      '<div class="sk-sub">MOVE 0/200</div>';
+    stage.appendChild(ribbon);
+    var pips = document.createElement('div');
+    pips.id = 'sk-pips';
+    stage.appendChild(pips);
+  }
+
+  // The beat builder. Named skBeat, NEVER markBeat: the chrome alias block
+  // declares `var markBeat = C.markBeat`, and a same-named function
+  // declaration here would be hoisted over by it. Every marker is a real
+  // <button> with a title and an aria-label, and it seeks on click.
+  function skBeat(tick, kind, label, startTick, maxTick) {
+    var scrub = skEl('scrub');
+    if (!scrub) return;
+    var span = Math.max(1, maxTick - startTick);
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'beat-marker ' + kind;
+    b.style.left = (Math.min(1, Math.max(0, (tick - startTick) / span)) * 100) + '%';
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.__tick = tick;
+    b.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (ctx && ctx.send) ctx.send('s:' + tick);
+    });
+    scrub.appendChild(b);
+  }
+
+  function skDrawBeats(s) {
+    if (beatsDrawn || !s.sok_beats) return;
+    beatsDrawn = true;
+    var st = Math.max(0, s.st || 0);
+    var mx = Math.max(st + 1, s.mx || 1);
+    for (var i = 0; i < s.sok_beats.length; i++) {
+      var b = s.sok_beats[i];
+      skBeat(b.t, b.k, b.label, st, mx);
+    }
+  }
+
+  // ---- the scorebug plate ------------------------------------------------
+  // Only the CONTENTS of the inherited plate change: the plate, the sides, the
+  // clock column and #plates-r (kept, rendered empty, because it is one of the
+  // scorebug's three flex columns and removing it would un-centre #clock) are
+  // the starter's.
+  function skPlate(s, g) {
+    var name = skEl('name-red');
+    if (name) {
+      name.textContent = g.name || 'COG';
+      name.title = g.name || '';
+    }
+    var num = skEl('lives-red');
+    if (num) num.textContent = String(g.score);
+    var label = document.querySelector('#plates-l .solved-label');
+    if (label) label.textContent = 'Score';
+    var chips = skEl('flag-red');
+    if (chips) {
+      var alias = chips.parentElement &&
+        chips.parentElement.querySelector('.sk-alias');
+      var kids = chips.querySelectorAll('.crate-chip');
+      for (var i = 0; i < kids.length; i++) {
+        kids[i].classList.toggle('on', i < (g.level && g.level.placed || 0));
+      }
+      if (!alias) {
+        var row = document.querySelector('#plates-l .lives-line');
+        if (row) {
+          var tag = document.createElement('span');
+          tag.className = 'sk-alias';
+          tag.textContent = g.alias.toUpperCase();
+          row.insertBefore(tag, row.firstChild);
+        }
+      }
+      var fb = document.querySelector('#plates-l .sk-fallback');
+      if (g.fallbackTurns > 0 && !fb) {
+        var row2 = document.querySelector('#plates-l .lives-line');
+        if (row2) {
+          var mark = document.createElement('span');
+          mark.className = 'sk-fallback';
+          mark.textContent = '\u21af';
+          mark.title = g.fallbackTurns + ' fallback turn(s)';
+          row2.appendChild(mark);
+        }
+      }
+    }
+  }
+
+  // ---- the clock ---------------------------------------------------------
+  function skClock(s, g) {
+    var big = skEl('clock-time'), cap = skEl('clock-caption');
+    if (big) big.textContent = 'SOLVED ' + g.solved + '/' + g.level.of;
+    if (cap) {
+      cap.textContent = 'weight ' + g.weight + '/' + g.maxWeight +
+        ' \u00b7 move ' + g.level.move + '/' + g.level.budget +
+        ' \u00b7 score ' + g.score;
+    }
+  }
+
+  // ---- the level ribbon and the six pips --------------------------------
+  function skRibbon(g) {
+    var ribbon = skEl('sk-ribbon');
+    if (!ribbon) return;
+    var tier = TIER_LABEL[g.level.tier] || '';
+    var full = 'LEVEL ' + g.level.index + '/' + g.level.of +
+      (tier ? ' \u00b7 ' + tier : '') +
+      (g.level.opt ? ' \u00b7 SOLVABLE IN ' + g.level.opt + ' PUSHES' : '');
+    ribbon.title = full;
+    ribbon.querySelector('.sk-main').textContent =
+      'LEVEL ' + g.level.index + '/' + g.level.of + (tier ? ' \u00b7 ' + tier : '');
+    ribbon.querySelector('.sk-sub').textContent =
+      (g.level.opt ? g.level.opt + ' PUSHES \u00b7 ' : '') +
+      'MOVE ' + g.level.move + '/' + g.level.budget;
+  }
+
+  function skPips(g) {
+    var host = skEl('sk-pips');
+    if (!host) return;
+    var levels = g.levels || [];
+    if (host.childNodes.length !== levels.length) {
+      host.innerHTML = '';
+      for (var i = 0; i < levels.length; i++) {
+        var pip = document.createElement('span');
+        pip.className = 'sk-pip';
+        pip.innerHTML = '<span class="sk-pipcap"></span>';
+        host.appendChild(pip);
+      }
+    }
+    for (var k = 0; k < levels.length; k++) {
+      var lv = levels[k];
+      var node = host.childNodes[k];
+      var cls = 'sk-pip t-' + lv.tier;
+      if (lv.outcome === 'solved') cls += ' solved';
+      else if (lv.outcome === 'deadlocked') cls += ' deadlocked';
+      else if (lv.outcome === 'outofsteps') cls += ' outofsteps';
+      if (k === g.level.index - 1 && g.level.active) cls += ' cur';
+      node.className = cls;
+      node.title = 'Level ' + (k + 1) + ' \u00b7 ' +
+        (TIER_LABEL[lv.tier] || '') + ' \u00b7 ' +
+        (lv.outcome === 'running' ? 'in play' : lv.outcome);
+      node.firstChild.textContent = (TIER_LABEL[lv.tier] || '').slice(0, 4);
+    }
+  }
+
+  // ---- the dead-square inset (the repurposed #fpv panel) ----------------
+  // The same 10 x 10 grid stripped to walls, marked squares, dead squares and
+  // crates, so the geometry of the trap is legible even when the main board is
+  // busy. Every glyph it draws is a CHIP, never text, so nothing can be laid
+  // out at a negative coordinate (--strict-text-bounds stays on).
+  function skInset(g) {
+    var panel = skEl('fpv'), canvas = skEl('fpv-canvas');
+    if (!panel || !canvas) return;
+    var rows = g.board && g.board.rows;
+    if (!rows || !rows.length) { panel.classList.remove('sk-on'); return; }
+    panel.classList.add('sk-on');
+    var name = skEl('fpv-name');
+    if (name) {
+      name.textContent = g.alias.toUpperCase() + ' \u00b7 ' +
+        (g.level.placed || 0) + ' OF 4 PARKED';
+    }
+    var dpr = window.devicePixelRatio || 1;
+    var cssW = canvas.clientWidth || 84, cssH = canvas.clientHeight || 84;
+    var w = Math.max(1, Math.round(cssW * dpr));
+    var h = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    var c = canvas.getContext('2d');
+    var n = rows.length;
+    var cell = Math.floor(Math.min(w, h) / n);
+    var ox = Math.floor((w - cell * n) / 2), oy = Math.floor((h - cell * n) / 2);
+    c.clearRect(0, 0, w, h);
+    c.fillStyle = '#16110d';
+    c.fillRect(0, 0, w, h);
+    var tiny = document.getElementById('stage').classList.contains('tiny');
+    var dead = {};
+    var list = (g.board && g.board.dead) || [];
+    for (var d = 0; d < list.length; d++) dead[list[d][0] + ',' + list[d][1]] = 1;
+    for (var y = 0; y < n; y++) {
+      for (var x = 0; x < rows[y].length; x++) {
+        var px = ox + x * cell, py = oy + y * cell;
+        var ch = rows[y][x];
+        if (ch === '#') {
+          c.fillStyle = '#4a3b2c';
+          c.fillRect(px, py, cell, cell);
+          continue;
+        }
+        c.fillStyle = '#241a12';
+        c.fillRect(px, py, cell, cell);
+        if (dead[x + ',' + y]) {
+          c.fillStyle = 'rgba(224,82,58,' + (tiny ? HATCH_ALPHA_TINY : HATCH_ALPHA) + ')';
+          c.fillRect(px, py, cell, cell);
+        }
+        if (ch === '.' || ch === '*' || ch === '+') {
+          c.fillStyle = '#e8a33d';
+          c.fillRect(px + cell * 0.32, py + cell * 0.32, cell * 0.36, cell * 0.36);
+        }
+        if (ch === '$' || ch === '*') {
+          c.fillStyle = ch === '*' ? '#45a85e' : '#a4713c';
+          c.fillRect(px + cell * 0.15, py + cell * 0.15, cell * 0.7, cell * 0.7);
+        }
+        if (ch === '@' || ch === '+') {
+          c.fillStyle = '#3f7cc4';
+          c.beginPath();
+          c.arc(px + cell / 2, py + cell / 2, Math.max(1, cell * 0.3), 0, 6.2832);
+          c.fill();
+        }
+      }
+    }
+  }
+
+  // ---- the endcard -------------------------------------------------------
+  // It stops at var(--band) (the starter's own rule, kept) so the scrubber
+  // stays clickable underneath, and every seek dismisses it (the starter's
+  // `else { $('endcard').classList.remove('on'); }` path, kept).
+  function skEndcard(s, g) {
+    var card = skEl('endcard');
+    if (!card) return;
+    card.classList.add('on');
+    var head = skEl('ec-headline');
+    if (head) {
+      head.className = 'headline ' + (g.win ? 'red' : 'draw');
+      head.textContent = g.solved + ' OF ' + g.level.of + ' SOLVED';
+    }
+    var cond = skEl('ec-wincond');
+    if (cond) {
+      cond.textContent = 'WEIGHT ' + g.weight + ' OF ' + g.maxWeight +
+        ' \u00b7 PAR ' + g.parWeight + (g.win ? ' MET' : ' MISSED');
+    }
+    var how = skEl('ec-how');
+    if (how) {
+      how.textContent = g.pushesTotal + ' pushes, ' + g.blockedMoves +
+        ' blocked moves, ' + g.deadlocks + ' deadlock' +
+        (g.deadlocks === 1 ? '' : 's') + ', ' + g.outOfSteps +
+        ' out of steps, ' + g.fallbackTurns + ' fallback turn' +
+        (g.fallbackTurns === 1 ? '' : 's') + ' \u00b7 SCORE ' + g.score;
+    }
+    var wrap = skEl('ec-teams');
+    if (!wrap) return;
+    var key = 'sk|' + g.solved + '|' + g.score + '|' + g.level.of;
+    if (wrap.__key === key) return;
+    wrap.__key = key;
+    var html = '<div class="ec-team win" id="ec-team-red">' +
+      '<div class="ec-tname red" id="ec-tname-red">' + skEscape(g.name) +
+      '</div>' +
+      '<div class="ec-lives"><span class="fl-num red" id="ec-red">' +
+      g.solved + '</span><span class="fl-cap">Levels solved</span></div>' +
+      '<div class="ec-thead"><span>Level</span><span>Tier</span>' +
+      '<span>Result</span><span>Moves</span><span>Crates</span></div>' +
+      '<div id="ec-rows-red">';
+    var levels = g.levels || [];
+    for (var i = 0; i < levels.length; i++) {
+      html += '<div class="ec-row"><span class="n">' + (i + 1) + '</span>' +
+        '<span class="n">' + (TIER_LABEL[levels[i].tier] || '') + '</span>' +
+        '<span class="n">' + levels[i].outcome + '</span>' +
+        '<span class="n">' + levels[i].moves + '</span>' +
+        '<span class="n">' + levels[i].placed + '</span></div>';
+    }
+    wrap.innerHTML = html + '</div></div>';
+  }
+
+  function skEscape(text) {
+    return String(text == null ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---- the match feed ----------------------------------------------------
+  // Plain language, never internal notation. Routed through the inherited
+  // pushFeed so the feed queue, its cap and its styling stay the starter's.
+  function skFeed(text, cls) {
+    if (ctx && ctx.pushFeed) ctx.pushFeed(text, cls || '');
+  }
+
+  function skOnEvent(e, s) {
+    var g = s.sok;
+    if (!g) return false;
+    switch (e.k) {
+      case 'levelstart':
+        skFeed('LEVEL ' + (e.i + 1) + ' OF ' + g.level.of + ' \u2014 ' +
+          (TIER_LABEL[e.tier] || '') + ', SOLVABLE IN ' + e.optPushes +
+          ' PUSHES');
+        if (ctx && ctx.banner) {
+          ctx.banner('LEVEL ' + (e.i + 1) + ' \u2014 ' +
+            (TIER_LABEL[e.tier] || '') + ' \u00b7 ' + e.optPushes + ' PUSHES');
+        }
+        return true;
+      case 'boxon':
+        skFeed('CRATE PARKED \u2014 ' + e.placed + ' OF 4');
+        return true;
+      case 'boxoff':
+        skFeed('CRATE PUSHED OFF ITS MARKED SQUARE \u2014 ' + e.placed + ' OF 4');
+        return true;
+      case 'plan':
+        skFeed('TURN ' + e.n + ' \u2014 ' + e.actions + ' ACTIONS, ' +
+          e.moves + ' MOVES' + (e.truncated ? ', PLAN CUT OFF' : '') +
+          (e.unreachable ? ', ' + e.unreachable + ' UNREACHABLE' : ''));
+        return true;
+      case 'say':
+        skFeed(g.alias + ': \u201c' + e.text + '\u201d', 'say');
+        return true;
+      case 'fallback':
+        skFeed('MISSED THE CALL \u2014 pusher plan');
+        return true;
+      case 'deadlock':
+        skFeed('DEADLOCK CREATED \u2014 CRATE ' + e.box + ' CORNERED AT (' +
+          e.x + ',' + e.y + ')', 'bad');
+        if (ctx && ctx.banner) {
+          ctx.banner('DEADLOCK CREATED \u2014 CRATE CORNERED AT (' +
+            e.x + ',' + e.y + ')');
+        }
+        return true;
+      case 'solved':
+        skFeed('LEVEL ' + (e.i + 1) + ' SOLVED IN ' + e.moves + ' MOVES / ' +
+          e.pushes + ' PUSHES', 'good');
+        return true;
+      case 'failed':
+        skFeed('LEVEL ' + (e.i + 1) + ' LOST \u2014 ' +
+          (e.why === 'deadlocked' ? 'DEADLOCKED' : 'OUT OF STEPS'), 'bad');
+        return true;
+      case 'budget':
+        skFeed('BUDGET GUARD \u2014 SCRIPTED FROM TURN ' + e.turn);
+        return true;
+      case 'end':
+        skFeed('FINAL \u2014 ' + e.solved + ' OF ' + e.of + ' SOLVED, WEIGHT ' +
+          e.weight + '/' + e.maxWeight);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  window.PaintballChrome = {
+    install: function (context) {
+      ctx = context;
+      skEnsureNodes();
+    },
+    frame: function (s, context, jumped) {
+      ctx = context || ctx;
+      if (jumped) { beatsDrawn = beatsDrawn; }
+      var g = s && s.sok;
+      if (!g) return;
+      try {
+        skEnsureNodes();
+        skDrawBeats(s);
+        skPlate(s, g);
+        skClock(s, g);
+        skRibbon(g);
+        skPips(g);
+        skInset(g);
+        if (s.ph === 'gameover') skEndcard(s, g);
+      } catch (err) {
+        // A chrome error must never latch static_replay.js into `failed`
+        // mid-replay (the cogball 0.1.4 scar): report it and keep drawing.
+        if (window.console) console.error('sokoban chrome:', err);
+      }
+      lastFeedTick = s.t;
+    },
+    event: function (e, s, context) {
+      ctx = context || ctx;
+      try {
+        return skOnEvent(e, s);
+      } catch (err) {
+        if (window.console) console.error('sokoban chrome event:', err);
+        return false;
+      }
+    }
+  };
+})();
+</script>
+</body>
+</html>

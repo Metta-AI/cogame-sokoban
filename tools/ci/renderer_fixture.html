@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sokoban renderer fixture</title>
+<style>
+  html, body { margin: 0; background: #0b0704; color: #f2e8d8;
+    font: 12px system-ui, sans-serif; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+  .cell { border: 1px solid #3a2c1e; }
+  .cell iframe { border: 0; display: block; }
+  .cap { padding: 2px 4px; color: #8a7f72; letter-spacing: 0.08em; }
+</style>
+</head>
+<body>
+<!--
+  The worst-case renderer fixture.
+
+  tools/ci/docker_smoke.sh runs with NO ANTHROPIC_API_KEY, so the seat in the
+  CI replay plays scripted and a scripted baseline emits NO `say` and NO
+  `notes` at all: every replay CI produces carries zero LLM text, and nothing
+  that plays a replay can draw the chrome that shows it (the cogchemists
+  2026-08-24 scar).
+
+  This fixture therefore LOADS THE SHIPPED BUNDLE'S OWN index.html in an
+  iframe and shims only the frame source - it does not re-implement the
+  drawing (the particle-worlds 2026-08-26 scar). The real page, the real
+  chrome_common.js, the real broadcast_core.js and the real appended SOKOBAN
+  block all run; this page just hands them a frame that CI's own replay can
+  never contain: a full-cap 140-rune `say`, a fully hatched dead-square board,
+  a DEADLOCK CREATED banner, all six level-pip states, all three tier names
+  and a deadlocked endcard - at 360 px, 640 px and 1280 px.
+-->
+<div class="row" id="row"></div>
+<script>
+(function () {
+  'use strict';
+  var WIDTHS = [[360, 203], [640, 360], [1280, 720]];
+
+  // Exactly 140 runes: the server's own MaxSayRunes, so the feed row is laid
+  // out at its true worst case rather than at whatever a scripted episode
+  // happened to produce.
+  var SAY = ('parking the two right-hand crates first, then coming back for ' +
+    'the pair on the left; box0 down is dead because row 7 carries no marked ' +
+    'square at all!!');
+  SAY = Array.from(SAY).slice(0, 140).join('');
+
+  var BOARD = [
+    '##########',
+    '#        #',
+    '#  #  #  #',
+    '#  .$    #',
+    '#   @ $. #',
+    '# #  #   #',
+    '#  .$    #',
+    '#     $. #',
+    '#   #    #',
+    '##########'
+  ];
+
+  var DEAD = [];
+  for (var y = 1; y < 9; y++) {
+    for (var x = 1; x < 9; x++) {
+      if ((x + y) % 3 === 0) DEAD.push([x, y]);
+    }
+  }
+
+  var LEVELS = [
+    { i: 0, tier: 'unfiltered', opt: 9, outcome: 'solved', placed: 4,
+      moves: 58, turns: 3, pushes: 12, relaxed: false },
+    { i: 1, tier: 'unfiltered', opt: 11, outcome: 'deadlocked', placed: 2,
+      moves: 44, turns: 3, pushes: 9, relaxed: false },
+    { i: 2, tier: 'medium', opt: 17, outcome: 'outofsteps', placed: 3,
+      moves: 200, turns: 10, pushes: 38, relaxed: false },
+    { i: 3, tier: 'medium', opt: 20, outcome: 'solved', placed: 4,
+      moves: 126, turns: 7, pushes: 21, relaxed: true },
+    { i: 4, tier: 'hard', opt: 26, outcome: 'running', placed: 1,
+      moves: 38, turns: 2, pushes: 5, relaxed: false },
+    { i: 5, tier: 'hard', opt: 24, outcome: 'unreached', placed: 0,
+      moves: 0, turns: 0, pushes: 0, relaxed: false }
+  ];
+
+  function state(phase) {
+    return {
+      t: 662, mt: 1200, ph: phase, lob: 0, pl: true, sp: 1, mx: 900, st: 0,
+      lp: true, sk: false, ff: false, en: true, mm: -1, bs: 1, pov: -1,
+      hold: 0,
+      teams: { red: { lives: 2, flag: 'home', carrier: -1, prog: 0,
+                      policies: ['sokoban-lookahead'] } },
+      roster: [{ s: 0, team: 'red', name: 'sokoban-lookahead',
+                 pol: 'sokoban-lookahead', col: 0, alive: true, lives: 0,
+                 hp: 1, carry: false, k: 0, d: 0, cap: 0, mk2: 0, mk3: 0,
+                 tk: 0, alias: 'Alpha', seat: 0, kind: 'llm' }],
+      events: [],
+      sok: {
+        level: { index: 5, of: 6, tier: 'hard', tierLabel: 'HARD', opt: 26,
+                 move: 38, budget: 200, pushes: 5, placed: 2, active: true },
+        levels: LEVELS,
+        board: { rows: BOARD, dead: DEAD },
+        solved: 2, weight: 3, maxWeight: 12, parWeight: 5, score: 3170382,
+        boxCredit: 14, pushesTotal: 85, blockedMoves: 47, deadlocks: 1,
+        outOfSteps: 1, fallbackTurns: 1, alias: 'Alpha',
+        name: 'sokoban-lookahead', kind: 'llm', reason: 'complete',
+        endRule: 'ladderComplete', win: false, feed: []
+      },
+      sok_beats: [
+        { t: 0, k: 'levelstart', label: 'LEVEL 1 \u2014 UNFILTERED, SOLVABLE IN 9 PUSHES' },
+        { t: 40, k: 'boxon', label: 'CRATE PARKED \u2014 1 OF 4' },
+        { t: 120, k: 'solved', label: 'LEVEL 1 SOLVED IN 58 MOVES / 12 PUSHES' },
+        { t: 300, k: 'deadlock', label: 'DEADLOCK CREATED \u2014 CRATE 2 CORNERED AT (7,1)' },
+        { t: 340, k: 'failed', label: 'LEVEL 2 LOST \u2014 DEADLOCKED' },
+        { t: 500, k: 'fallback', label: 'MISSED THE CALL \u2014 pusher plan' },
+        { t: 880, k: 'end', label: 'FINAL \u2014 2 OF 6 SOLVED' }
+      ],
+      lead: { teams: ['red'], pts: [[0, 0], [40, 1], [120, 4], [662, 14]] },
+      lulls: [[400, 470]]
+    };
+  }
+
+  var EVENTS = [
+    { k: 'levelstart', t: 0, i: 4, tier: 'hard', optPushes: 26 },
+    { k: 'say', t: 10, text: SAY },
+    { k: 'plan', t: 12, n: 23, moves: 20, actions: 4, truncated: true,
+      dropped: 1, unreachable: 1, source: 'llm' },
+    { k: 'boxon', t: 20, box: 1, x: 7, y: 4, placed: 2 },
+    { k: 'boxoff', t: 24, box: 0, x: 3, y: 3, placed: 1 },
+    { k: 'deadlock', t: 30, kind: 'frozen_block', box: 2, x: 7, y: 1 },
+    { k: 'failed', t: 31, i: 4, why: 'deadlocked' },
+    { k: 'fallback', t: 32, cause: 'timeout' },
+    { k: 'solved', t: 33, i: 3, moves: 126, pushes: 21, turns: 7 },
+    { k: 'budget', t: 34, turn: 40, remaining_s: 30 },
+    { k: 'end', t: 35, reason: 'complete', endRule: 'ladderComplete',
+      solved: 2, of: 6, weight: 3, maxWeight: 12, score: 3170382 }
+  ];
+
+  var pending = WIDTHS.length;
+  var failed = null;
+
+  WIDTHS.forEach(function (size) {
+    var cell = document.createElement('div');
+    cell.className = 'cell';
+    var cap = document.createElement('div');
+    cap.className = 'cap';
+    cap.textContent = size[0] + ' x ' + size[1];
+    var frame = document.createElement('iframe');
+    frame.width = size[0];
+    frame.height = size[1];
+    frame.src = './index.html?replay=./replay.json';
+    cell.appendChild(cap);
+    cell.appendChild(frame);
+    document.getElementById('row').appendChild(cell);
+
+    frame.addEventListener('load', function () {
+      // The bundle boots its wasm runtime asynchronously; poll for the chrome
+      // hook rather than racing it.
+      var tries = 0;
+      var timer = setInterval(function () {
+        tries++;
+        var w = frame.contentWindow;
+        var chrome = w && w.SokobanChrome;
+        if (!chrome && tries < 120) return;
+        clearInterval(timer);
+        if (!chrome) {
+          failed = 'SokobanChrome never appeared at ' + size[0] + 'px';
+          finish();
+          return;
+        }
+        try {
+          var playing = state('playing');
+          chrome.frame(playing, null, false);
+          for (var i = 0; i < EVENTS.length; i++) {
+            chrome.event(EVENTS[i], playing, null);
+          }
+          chrome.frame(state('gameover'), null, false);
+        } catch (err) {
+          failed = String(err && err.message ? err.message : err);
+        }
+        finish();
+      }, 100);
+    });
+  });
+
+  function finish() {
+    pending--;
+    if (pending > 0) return;
+    if (failed) {
+      document.documentElement.setAttribute('data-replay-error', failed);
+      return;
+    }
+    document.documentElement.setAttribute('data-replay-loaded', 'true');
+  }
+})();
+</script>
+</body>
+</html>
