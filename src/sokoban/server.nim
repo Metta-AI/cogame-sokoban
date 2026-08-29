@@ -178,21 +178,10 @@ proc finishEpisode(writer: ReplayWriter, log: EventLog) =
   ## The REPLAY first, then the results: the hosted worker treats results.json
   ## as the end of the episode and tears the pods down when it appears, so a
   ## replay written after it can be lost.
-  ##
-  ## The two writes are INDEPENDENT. `writeArtifact` raises on a non-2xx POST,
-  ## and a failed replay upload must not also cost the results document — the
-  ## design note's `fault` rule is "artifacts are still written, exit 0", and
-  ## `results.json` is what the platform scores the episode from.
-  try:
-    writeArtifact(runtimeCfg.replayUri, replayData, "application/octet-stream",
-      "COGAME_SAVE_REPLAY_METHOD")
-  except CatchableError as error:
-    echo "sokoban: replay write FAILED — ", error.msg
-  try:
-    writeArtifact(runtimeCfg.resultsUri, $results, "application/json",
-      "COGAME_RESULTS_METHOD")
-  except CatchableError as error:
-    echo "sokoban: results write FAILED — ", error.msg
+  writeArtifact(runtimeCfg.replayUri, replayData, "application/octet-stream",
+    "COGAME_SAVE_REPLAY_METHOD")
+  writeArtifact(runtimeCfg.resultsUri, $results, "application/json",
+    "COGAME_RESULTS_METHOD")
   if eventsSinkPath.len > 0:
     try:
       writeFile(eventsSinkPath, log.eventsJsonl(gameSim.tick))
@@ -383,24 +372,11 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
       detail = error.msg
       echo "sokoban: FAULT — ", error.msg
 
-    ## THE SETTLE AND THE ARTIFACT WRITE ARE INSIDE THE FAULT GUARD TOO. The
-    ## design note's `fault` rule is "caught; the episode is settled from the
-    ## last completed tick, artifacts are still written, exit 0" — and the
-    ## stop record, `settle` and `finishEpisode` can all raise: `writeArtifact`
-    ## raises `IOError` on a non-2xx POST. An exception here used to propagate
-    ## out of `runGame` on the game thread with no results, no replay and no
-    ## exit 0.
-    try:
-      if reason != endComplete:
-        writer.writeStop(StopRecord(
-          tick: gameSim.tick, reason: reason, endRule: rule, detail: detail))
-      gameSim.settle(reason, rule, detail)
-      finishEpisode(writer, log)
-    except CatchableError as error:
-      ## Nothing here may take the game thread down: the episode still exits 0
-      ## after the shutdown grace, so `/healthz` and `/global` keep answering
-      ## and the platform sees a finished pod rather than a crashed one.
-      echo "sokoban: FAULT while settling — ", error.msg
+    if reason != endComplete:
+      writer.writeStop(StopRecord(
+        tick: gameSim.tick, reason: reason, endRule: rule, detail: detail))
+    gameSim.settle(reason, rule, detail)
+    finishEpisode(writer, log)
     ## Keep /healthz and /global answering for a bounded grace after the
     ## artifacts are written, then exit.
     sleep(ShutdownGraceSeconds * 1000)
@@ -511,20 +487,10 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
     if duplicate:
       request.respond(409)
       return
-    ## The REAL player name, spectator side only. The platform names a seat on
-    ## the player websocket URL (`/player?slot&token&name=`), which is the
-    ## starter's own route (`coworld-ctf`'s `playerIdentity`,
-    ## `src/ctf/server.nim:471-475`); the registration blob the shipped player
-    ## sends carries no name at all, so without this `results.names` fell back
-    ## to the POLICY LABEL for every episode.
-    let declaredName = request.queryParams["name"]
-      .strip().truncateRunes(MaxPolicyLabelRunes)
     let websocket = request.upgradeToWebSocket()
     withLock stateLock:
       shared.playerSockets[slot] = websocket
       shared.socketSlots[websocket] = slot
-      if declaredName.len > 0:
-        shared.names[slot] = declaredName
       echo "sokoban: player slot ", slot, " connected (",
         shared.playerSockets.len, "/", shared.seats, ")"
       try:
@@ -581,15 +547,9 @@ proc applyRegistration(slot: int, text: string): bool =
     if shared.policies[slot].len == 0:
       shared.policies[slot] =
         if isLlm: "llm" else: $shared.scripted[slot]
-    ## Name resolution, in order: the registration blob, then the name the
-    ## platform put on the socket URL, then — only when neither exists — the
-    ## policy label, which is what a local run has. The alias (`Alpha`) is a
-    ## different name space and never appears here.
-    let registeredName =
-      payload{"name"}.getStr().strip().truncateRunes(MaxPolicyLabelRunes)
-    if registeredName.len > 0:
-      shared.names[slot] = registeredName
-    elif shared.names[slot].len == 0:
+    shared.names[slot] =
+      payload{"name"}.getStr().truncateRunes(MaxPolicyLabelRunes)
+    if shared.names[slot].len == 0:
       shared.names[slot] = shared.policies[slot]
     shared.registered[slot] = true
     shared.everRegistered[slot] = true
@@ -689,7 +649,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   shared.everRegistered = newSeq[bool](shared.seats)
   for slot in 0 ..< shared.seats:
     shared.policies[slot] = "pusher"
-    shared.names[slot] = ""
+    shared.names[slot] = "pusher"
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler, workerThreads = 4)
   createThread(gameThread, runGame, runtimeConfig)
