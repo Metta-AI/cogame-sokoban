@@ -322,6 +322,24 @@ jobs:
         with:
           node-version: "22"
 
+      # The native shards run 64-bit. The shipped viewer is --cpu:wasm32: `int`
+      # is 32 bits (overflow checks trap on arithmetic that is silently fine
+      # natively) and the address space ends at 2 GB. This runs the EXACT
+      # emitted module in node, headless, against the replay docker-smoke just
+      # produced, stepping frames with the per-tick hash check on -- the design
+      # note's test 51, which was committed and wired to nothing. It needs no
+      # browser, so it runs before the Playwright download and fails fast.
+      - name: Run the emitted wasm module headlessly
+        run: |
+          set -euo pipefail
+          replay=""
+          for candidate in dist/smoke/*.replay dist/smoke/replay.json; do
+            if [ -f "${candidate}" ]; then replay="${candidate}"; break; fi
+          done
+          test -n "${replay}" || {
+            echo "::error::docker-smoke uploaded no replay to dist/smoke"; exit 1; }
+          node tools/wasm_replay_smoke.cjs dist/static-replay-viewer "${replay}" 300
+
       - name: Install Playwright (pinned 1.55.0)
         run: |
           set -euo pipefail
