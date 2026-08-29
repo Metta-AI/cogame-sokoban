@@ -487,10 +487,20 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
     if duplicate:
       request.respond(409)
       return
+    ## The REAL player name, spectator side only. The platform names a seat on
+    ## the player websocket URL (`/player?slot&token&name=`), which is the
+    ## starter's own route (`coworld-ctf`'s `playerIdentity`,
+    ## `src/ctf/server.nim:471-475`); the registration blob the shipped player
+    ## sends carries no name at all, so without this `results.names` fell back
+    ## to the POLICY LABEL for every episode.
+    let declaredName = request.queryParams.getOrDefault("name", "")
+      .strip().truncateRunes(MaxPolicyLabelRunes)
     let websocket = request.upgradeToWebSocket()
     withLock stateLock:
       shared.playerSockets[slot] = websocket
       shared.socketSlots[websocket] = slot
+      if declaredName.len > 0:
+        shared.names[slot] = declaredName
       echo "sokoban: player slot ", slot, " connected (",
         shared.playerSockets.len, "/", shared.seats, ")"
       try:
@@ -547,9 +557,15 @@ proc applyRegistration(slot: int, text: string): bool =
     if shared.policies[slot].len == 0:
       shared.policies[slot] =
         if isLlm: "llm" else: $shared.scripted[slot]
-    shared.names[slot] =
-      payload{"name"}.getStr().truncateRunes(MaxPolicyLabelRunes)
-    if shared.names[slot].len == 0:
+    ## Name resolution, in order: the registration blob, then the name the
+    ## platform put on the socket URL, then — only when neither exists — the
+    ## policy label, which is what a local run has. The alias (`Alpha`) is a
+    ## different name space and never appears here.
+    let registeredName =
+      payload{"name"}.getStr().strip().truncateRunes(MaxPolicyLabelRunes)
+    if registeredName.len > 0:
+      shared.names[slot] = registeredName
+    elif shared.names[slot].len == 0:
       shared.names[slot] = shared.policies[slot]
     shared.registered[slot] = true
     shared.everRegistered[slot] = true
@@ -649,7 +665,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   shared.everRegistered = newSeq[bool](shared.seats)
   for slot in 0 ..< shared.seats:
     shared.policies[slot] = "pusher"
-    shared.names[slot] = "pusher"
+    shared.names[slot] = ""
   let router = buildRouter(replayMode = false)
   gameServer = newServer(router, websocketHandler, workerThreads = 4)
   createThread(gameThread, runGame, runtimeConfig)

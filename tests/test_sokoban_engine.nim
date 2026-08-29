@@ -155,6 +155,24 @@ suite "no seat can stall":
     check "message" in keys
     check "failed_policy_index" in keys
 
+  test "the real player name comes off the socket, not the policy label":
+    # `results.names` is the SPECTATOR name space. The shipped player's
+    # registration blob carries no `name` key at all, so the server reads the
+    # one the platform puts on the player socket URL — the starter's own
+    # `/player?slot&token&name=` route — and only falls back to the policy
+    # label when nothing named the seat.
+    let source = readFile("src/sokoban/server.nim")
+    check "queryParams.getOrDefault(\"name\", \"\")" in source
+    check "shared.names[slot] = declaredName" in source
+    check "shared.names[slot] = registeredName" in source
+    # And the alias never leaks into that space.
+    let cfg = defaultConfig()
+    let sim = newSimServer(cfg)
+    sim.seats[0].name = "daveey"
+    sim.seats[0].policyLabel = "lookahead"
+    check sim.ladderResultsJson()["names"][0].getStr() == "daveey"
+    check sim.ladderResultsJson()["aliases"][0].getStr() == "Alpha"
+
   test "the server refuses to start silently when a joined seat never registers":
     let source = readFile("src/sokoban/server.nim")
     check "connected but never sent a " in source
