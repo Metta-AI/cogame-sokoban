@@ -316,15 +316,43 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
           say: directive.say, notes: directive.notes))
         log.add(seTurnStart, gameSim.tick, %*{
           "turn": gameSim.turnsPlayed + 1, "source": $directive.source})
+        log.add(seDirective, gameSim.tick, %*{
+          "turn": gameSim.turnsPlayed + 1, "source": $directive.source,
+          "actions": directive.actionsJson(), "latency_ms": directive.latencyMs,
+          "dropped": directive.dropped + directive.overCap})
+        if directive.source == dsFallback:
+          log.add(seFallback, gameSim.tick, %*{
+            "turn": gameSim.turnsPlayed + 1})
         gameSim.beginTurn(directive)
         while not gameSim.turnComplete():
           let before = gameSim.state.player
           let pushesBefore = gameSim.levelPushes
+          ## The sim's own derived events accumulate until they are drained
+          ## for the broadcast at the end of the turn, so the ones this tick
+          ## produced are the entries past this mark. Mapping them here is
+          ## what makes the tier-2 stream the FULL action trace the design
+          ## note promises `cogamer-rl`, rather than three of its eleven
+          ## kinds: nothing else knows a crate went on target, or which of
+          ## the three deadlock rules fired.
+          let eventMark = gameSim.events.len
           gameSim.stepTick()
           writer.writeHash(gameSim.gameHashValue)
           log.add(seMove, gameSim.tick, %*{
             "from": before, "to": gameSim.state.player,
             "push": gameSim.levelPushes > pushesBefore})
+          if gameSim.levelPushes > pushesBefore:
+            log.add(sePush, gameSim.tick, %*{
+              "from": before, "to": gameSim.state.player,
+              "pushes": gameSim.levelPushes})
+          for i in eventMark ..< gameSim.events.len:
+            let event = gameSim.events[i]
+            case event{"k"}.getStr()
+            of "boxon": log.add(seBoxOn, gameSim.tick, event.copy())
+            of "boxoff": log.add(seBoxOff, gameSim.tick, event.copy())
+            of "deadlock": log.add(seDeadlock, gameSim.tick, event.copy())
+            of "solved": log.add(seSolved, gameSim.tick, event.copy())
+            of "failed": log.add(seFailed, gameSim.tick, event.copy())
+            else: discard
           if gameSim.turnEnded:
             break
         gameSim.endTurn(directive.notes)

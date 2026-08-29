@@ -99,6 +99,14 @@ suite "the tier-2 analysis stream":
     expected.sort()
     check names == expected
 
+  test "every declared SimEventKind is actually emitted by the server":
+    # A declared-but-never-written kind is a stream that claims to be a full
+    # action trace for `cogamer-rl` and carries three of its eleven rows.
+    let source = readFile("src/sokoban/server.nim")
+    for kind in SimEventKind:
+      var identifier = "se" & $kind
+      check ("log.add(" & identifier & ",") in source
+
 suite "the fallback cause set is closed":
   test "every cause decide.nim can write is one of the seven declared":
     # `fallback.cause` is a CLOSED set in the design note; a cause outside it
