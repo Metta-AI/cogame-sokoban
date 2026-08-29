@@ -93,6 +93,30 @@ suite "replay is self-sufficient":
     let source = readFile("src/sokoban/replay_runtime.nim")
     check "generateLevel" notin source
 
+suite "the parser rejects a corrupt replay rather than trusting it":
+  test "every byte-to-enum read is range-checked, like the record kind":
+    # `T(cursor.readU8())` on a 0..255 byte is a range error in a debug build
+    # and an OUT-OF-RANGE ENUM in the `-d:release` viewer build, where checks
+    # are off: a corrupt byte then reaches a `case` no branch covers. The
+    # tier field on the same path was already validated; these three were not.
+    let source = readFile("src/sokoban/replays.nim")
+    for unchecked in ["DirectiveSource(cursor.readU8())",
+                      "ActionKind(cursor.readU8())", "Dir(cursor.readU8())"]:
+      check unchecked notin source
+    check source.count("readEnumU8") == 4   # the proc plus its three uses
+
+  test "a truncated replay raises SokobanError, never a silent short read":
+    var cfg = defaultConfig()
+    cfg.seed = 31
+    cfg.levelCount = 1
+    cfg.tierLadder = @[tierUnfiltered]
+    cfg.maxTurns = cfg.levelTurnCap
+    let episode = runEpisode(cfg, blPusher, record = true)
+    let data = parseReplayBytes(episode.replay)
+    check data.records.len > 0
+    expect SokobanError:
+      discard parseReplayBytes(episode.replay[0 ..< episode.replay.len - 9])
+
 suite "determinism from the replay alone":
   test "identical final tick, levels solved, crate credit and per-tick hash":
     var cfg = defaultConfig()

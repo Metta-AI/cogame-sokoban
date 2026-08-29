@@ -123,6 +123,19 @@ proc readU64(cursor: var Cursor): uint64 =
       (shift * 8))
     inc cursor.offset
 
+proc readEnumU8[T: enum](cursor: var Cursor, what: string): T =
+  ## One byte, VALIDATED against the enum's own range. An unchecked
+  ## `T(cursor.readU8())` is a range error in a debug build and an
+  ## out-of-range enum in a `-d:release` viewer build, where checks are off:
+  ## the corrupt byte then flows into the sim as a `case` on a value no branch
+  ## covers. A truncated or corrupt replay must raise a `SokobanError`, which
+  ## is what the shell turns into `data-replay-error`.
+  let value = cursor.readU8()
+  if value < ord(low(T)) or value > ord(high(T)):
+    raise newException(SokobanError,
+      "unknown " & what & " in replay record: " & $value)
+  T(value)
+
 proc readText(cursor: var Cursor): string =
   let length = cursor.readU32()
   cursor.need(length)
@@ -247,14 +260,14 @@ proc parseReplayBytes*(data: string): ReplayData =
     of rkPlan:
       record.plan.turn = cursor.readU16()
       record.plan.level = cursor.readU16()
-      record.plan.source = DirectiveSource(cursor.readU8())
+      record.plan.source = cursor.readEnumU8[:DirectiveSource]("plan source")
       let actions = cursor.readU16()
       for _ in 0 ..< actions:
         var action: Action
-        action.kind = ActionKind(cursor.readU8())
+        action.kind = cursor.readEnumU8[:ActionKind]("action kind")
         action.seq = cursor.readText()
         action.box = cursor.readU8()
-        action.dir = Dir(cursor.readU8())
+        action.dir = cursor.readEnumU8[:Dir]("action direction")
         action.times = cursor.readU8()
         action.x = cursor.readU8()
         action.y = cursor.readU8()
