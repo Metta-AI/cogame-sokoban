@@ -142,6 +142,19 @@ suite "reply validation":
     check directive.actions[0].box == 0
     check directive.dropped == 4
 
+  test "`do` is exactly the four declared verbs, and an absent one DROPS":
+    let payload = parseJson("""{"actions":[
+      {"do":"move","seq":"UU"},
+      {"do":"go","x":1,"y":1},
+      {"do":"seq","seq":"UU"},
+      {"seq":"UU"},
+      {"do":"","x":1,"y":1},
+      {"do":"moves","seq":"UU"}]}""")
+    let directive = parseDirective(payload, 8)
+    check directive.actions.len == 1
+    check directive.actions[0].kind == akMoves
+    check directive.dropped == 5
+
   test "goto coordinates and times are clamped, do and dir are case-folded":
     let payload = parseJson("""{"actions":[
       {"do":"GOTO","x":99,"y":-5},

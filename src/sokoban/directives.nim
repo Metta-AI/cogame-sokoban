@@ -134,11 +134,17 @@ proc parseAction*(node: JsonNode): tuple[ok: bool, action: Action] =
   let doText = node{"do"}.getStr().truncateRunes(MaxActionDoRunes)
     .strip().toLowerAscii()
   var kind: ActionKind
+  ## The enum is exactly the four verbs the reply schema and `docs/ACTIONS.md`
+  ## declare, lower-cased before matching. Nothing else is accepted: a wider
+  ## domain than the contract is a domain a policy author is never told about,
+  ## and an ABSENT `do` used to become a `wait` here — inventing an action out
+  ## of an entry that does not validate, which is exactly what the "drop,
+  ## never rewrite" rule exists to prevent.
   case doText
-  of "moves", "move", "seq": kind = akMoves
+  of "moves": kind = akMoves
   of "push": kind = akPush
-  of "goto", "go": kind = akGoto
-  of "wait", "": kind = akWait
+  of "goto": kind = akGoto
+  of "wait": kind = akWait
   else: return (false, Action())
   var action = Action(kind: kind, times: 1)
   case kind
