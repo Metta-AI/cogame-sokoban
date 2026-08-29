@@ -238,6 +238,7 @@ proc generateLevel*(
   var
     bestReached = -1
     bestDistance = high(int)
+    bestAttempt = 0
     bestBoard: Board
     bestNode: GoalNode
     haveBest = false
@@ -309,6 +310,7 @@ proc generateLevel*(
       if relaxed.ok:
         bestDistance = distance
         bestReached = bfs.reached
+        bestAttempt = attempt
         bestBoard = board
         bestNode = relaxed.node
         haveBest = true
@@ -321,7 +323,14 @@ proc generateLevel*(
       if flood[cell]:
         region.add(cell)
     if region.len > 0:
-      state.player = region[int(hashAt(seed, levelIndex, 0, 500) mod
+      ## The player cell is drawn from the hash stream of the attempt that
+      ## produced this state, not from attempt 0's: every other draw for this
+      ## level — the walls, the marked squares, the band depth, the state pick
+      ## — is `mix64(seed, levelIndex, attempt, salt)` for THIS attempt, and
+      ## reading a different attempt's word here made the player start the one
+      ## quantity that did not come from the room it stands in. Still a pure
+      ## function of `(seed, levelIndex, tier)`, so levels stay reproducible.
+      state.player = region[int(hashAt(seed, levelIndex, bestAttempt, 500) mod
         uint64(region.len))]
     result.state = state
     result.tier = tier
