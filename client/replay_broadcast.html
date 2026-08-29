@@ -3052,6 +3052,15 @@ body[data-embed] #board { top: 0; height: 100%; }
   white-space: nowrap;
 }
 
+/* ---- the feed's own severity colours ---------------------------------- */
+/* The block tags rows `bad` (a deadlock, a lost level) and `good` (a solve),
+   and the inherited page styles neither, so the moment the spectator came for
+   read exactly like a routine turn line. */
+#killfeed .feed-row.bad { box-shadow: inset 0 calc(-2 * var(--u)) 0 var(--red); }
+#killfeed .feed-row.bad .who { color: var(--red); }
+#killfeed .feed-row.good { box-shadow: inset 0 calc(-2 * var(--u)) 0 var(--green); }
+#killfeed .feed-row.good .who { color: var(--green); }
+
 /* ---- the `say` feed row: a RESERVED BAND, sized from the server's cap --- */
 /* The one string on this page whose length the SERVER caps is the cog's
    `say` (MaxSayRunes = 140), and it is the only chrome that exists to show
