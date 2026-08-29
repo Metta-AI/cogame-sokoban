@@ -260,15 +260,6 @@
   var ctx = null;
   var beatsDrawn = false;
   var lastFeedTick = -1;
-  // The offending crate's cell and the tick the deadlock fired on. The BOARD
-  // cannot carry this: it is composited in the Worker from the sim's own
-  // packet, and a deadlock ENDS the level on the tick it happens, so the
-  // board is already the next level a frame later. The dead-square inset is
-  // this block's own canvas and exists for exactly this geometry, so the ring
-  // and the two flashes live there, alongside the #bannerlane call and the
-  // tallest, reddest beat on the scrubber.
-  var deadFlash = null;
-  var FLASH_TICKS = 24;   // ~2 s at 12 ticks/s, two flashes of six ticks each
 
   function skEl(id) { return document.getElementById(id); }
 
@@ -430,7 +421,7 @@
   // crates, so the geometry of the trap is legible even when the main board is
   // busy. Every glyph it draws is a CHIP, never text, so nothing can be laid
   // out at a negative coordinate (--strict-text-bounds stays on).
-  function skInset(g, tick) {
+  function skInset(g) {
     var panel = skEl('fpv'), canvas = skEl('fpv-canvas');
     if (!panel || !canvas) return;
     var rows = g.board && g.board.rows;
@@ -487,18 +478,6 @@
           c.arc(px + cell / 2, py + cell / 2, Math.max(1, cell * 0.3), 0, 6.2832);
           c.fill();
         }
-      }
-    }
-    // THE DEADLOCK FLASH: the offending crate ringed in red, flashing twice.
-    if (deadFlash && tick >= deadFlash.t &&
-        tick - deadFlash.t <= FLASH_TICKS) {
-      var on = Math.floor((tick - deadFlash.t) / 6) % 2 === 0;
-      if (on) {
-        var rx = ox + deadFlash.x * cell, ry = oy + deadFlash.y * cell;
-        var lw = Math.max(1, Math.round(cell * 0.16));
-        c.strokeStyle = '#e0523a';
-        c.lineWidth = lw;
-        c.strokeRect(rx + lw / 2, ry + lw / 2, cell - lw, cell - lw);
       }
     }
   }
@@ -604,7 +583,6 @@
         skFeed('MISSED THE CALL \u2014 pusher plan');
         return true;
       case 'deadlock':
-        deadFlash = { x: e.x, y: e.y, t: (e.t === undefined ? s.t : e.t) };
         skFeed('DEADLOCK CREATED \u2014 CRATE ' + e.box + ' CORNERED AT (' +
           e.x + ',' + e.y + ')', 'bad');
         if (ctx && ctx.banner) {
@@ -639,9 +617,7 @@
     },
     frame: function (s, context, jumped) {
       ctx = context || ctx;
-      // A seek re-derives the world from scratch, so a flash from the tick
-      // we left behind must not survive it.
-      if (jumped) { deadFlash = null; }
+      if (jumped) { beatsDrawn = beatsDrawn; }
       var g = s && s.sok;
       if (!g) return;
       try {
@@ -651,7 +627,7 @@
         skClock(s, g);
         skRibbon(g);
         skPips(g);
-        skInset(g, s.t);
+        skInset(g);
         if (s.ph === 'gameover') skEndcard(s, g);
       } catch (err) {
         // A chrome error must never latch static_replay.js into `failed`
