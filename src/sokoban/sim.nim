@@ -278,7 +278,11 @@ proc beginTurn*(sim: SimServer, directive: Directive) =
   sim.turnBlocked = 0
   sim.turnExecuted = ""
   sim.turnEnded = false
-  sim.actionsDropped += directive.dropped + directive.overCap
+  ## The two counters are DISJOINT, as the design note's turn steps 6a and 6b
+  ## describe them: `actionsDropped` counts the entries past
+  ## `maxActionsPerTurn`, `repliesRepaired` counts the entries that failed
+  ## validation. A phase-60 reader adds them for the total.
+  sim.actionsDropped += directive.overCap
   sim.macrosUnreachable += expansion.unreachable
   sim.repliesRepaired += directive.dropped
   inc sim.turnsPlayed
