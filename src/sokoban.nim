@@ -1,11 +1,16 @@
 ## Sokoban entrypoint: reads the Coworld runtime contract and starts either a
 ## live episode server or a replay viewer server.
 ##
-## SEED RANDOMISATION HAPPENS HERE, before `config.update`'s pinned seed is
-## honoured, so every seed-derived draw — the walls, the marked squares, the
-## band depth, the state pick and the player start of every level — follows the
-## FINAL seed (paintbot's rule, `src/ctf.nim:7-46`). The seed is randomised by
-## the runner, never disclosed to the seat, and spans 2^63.
+## SEED RANDOMISATION HAPPENS HERE, and the ORDER is: read the runner's config
+## first, then randomise only if the runner did not pin a seed — so a pinned
+## seed always wins and every seed-derived draw (the walls, the marked squares,
+## the band depth, the state pick and the player start of every level) follows
+## the FINAL seed. Nothing reads `config.seed` between the two steps: the first
+## `generateLevel` call is `server.nim`'s, after both. `seedPinned` reads the
+## RAW config text rather than the merged struct, because `defaultConfig()`
+## already carries a seed and a merged struct cannot say whether the runner
+## meant it. The seed is randomised by the runner, never disclosed to the seat,
+## and spans 2^63.
 
 import std/[json, strutils, sysrand]
 import bitworld/runtime
