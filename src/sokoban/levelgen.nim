@@ -237,6 +237,7 @@ proc generateLevel*(
   ## design note's §Level sourcing, exactly.
   var
     bestReached = -1
+    bestDistance = high(int)
     bestBoard: Board
     bestNode: GoalNode
     haveBest = false
@@ -296,9 +297,17 @@ proc generateLevel*(
       result.dead = board.deadSquares()
       result.tierRelaxed = false
       return
-    if bfs.reached > bestReached:
+    ## Step 11: when no attempt hits the band, the level that ships is the
+    ## attempt whose `reachedDepth` is CLOSEST TO bandMin — not the deepest
+    ## one. Every attempt is clamped at its own `targetDepth` inside the band,
+    ## so "deepest" and "closest to bandMin" pick different attempts whenever
+    ## two straddle bandMin, and the relaxed level should be the one that
+    ## misses the declared band by the least.
+    let distance = abs(bfs.reached - bandMin)
+    if distance < bestDistance:
       let relaxed = pick(bfs.deepest)
       if relaxed.ok:
+        bestDistance = distance
         bestReached = bfs.reached
         bestBoard = board
         bestNode = relaxed.node
