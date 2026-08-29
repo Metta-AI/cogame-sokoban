@@ -153,6 +153,18 @@
 }
 
 /* ---- the dead-square inset (the repurposed #fpv panel) ---------------- */
+/* IT RIDES THE TRANSPORT BAND. The starter anchors its first-person panel
+   64u above the stage bottom and this fork's `.tiny` override used 30u —
+   both measured from the stage bottom with no
+   `var(--band)` term, i.e. inside the strip relayout() reserves for the
+   transport, which is built from `--u` units too (padding 16u + a 34u scrub +
+   a 26u-min button row, so >= 76u before it wraps). This game repurposes the
+   panel as its own readout, so it obeys the same rule the ribbon and the pips
+   already do: nothing this block positions may sit in the band.
+   tools/ci/renderer_fixture.html measures it against #transport's own rect at
+   360/640/1280 px and fails the viewer smoke on any intersection. */
+#fpv { bottom: calc(var(--band, 0px) + 12 * var(--u)); }
+#killfeed { bottom: calc(var(--band, 0px) + 12 * var(--u)); }
 #fpv.sk-on { display: block; aspect-ratio: 1 / 1; }
 #fpv-canvas { width: 100%; height: 100%; display: block; }
 
@@ -237,7 +249,7 @@
 #stage.tiny .plate .lives-num { font-size: calc(13 * var(--u)); }
 #stage.tiny .plate .crates { margin-right: calc(3 * var(--u)); }
 #stage.tiny .crate-chip { width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
-#stage.tiny #fpv { left: calc(4 * var(--u)); bottom: calc(30 * var(--u)); }
+#stage.tiny #fpv { left: calc(4 * var(--u)); bottom: calc(var(--band, 0px) + 22 * var(--u)); }
 #stage.tiny #fpv {
   width: calc(84 * var(--u)) !important;
   height: calc(84 * var(--u)) !important;

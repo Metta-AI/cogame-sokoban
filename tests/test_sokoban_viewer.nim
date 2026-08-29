@@ -149,9 +149,28 @@ suite "transport, endcard and the 360 px rules":
     let bannerAt = page.find(BannerMarker)
     let gameBlock = page[bannerAt .. ^1]
     # Every absolutely positioned addition anchors to the TOP band, never the
-    # bottom one; the inset keeps the starter's own bottom offset.
+    # bottom one.
     check "top: calc(var(--topband, 0px)" in gameBlock
     check "bottom: 0" notin gameBlock.replace("bottom: 0;\n  width: calc(3", "")
+    # And every one that anchors to the BOTTOM rides var(--band). The starter's
+    # own defaults for the repurposed #fpv (64u) and for #killfeed (76u) are
+    # hard-coded guesses at the transport's height, so this game overrides both
+    # with the measured variable; `tools/ci/renderer_fixture.html` then
+    # measures the rendered rects against #transport itself.
+    for anchored in ["#fpv { bottom: calc(var(--band, 0px)",
+                     "#killfeed { bottom: calc(var(--band, 0px)",
+                     "#stage.tiny #fpv { left: calc(4 * var(--u)); " &
+                       "bottom: calc(var(--band, 0px)"]:
+      check anchored in gameBlock
+    var index = 0
+    while true:
+      index = gameBlock.find("bottom: calc(", index)
+      if index < 0:
+        break
+      let tail = gameBlock[index ..< min(gameBlock.len, index + 60)]
+      check "var(--band" in tail
+      index += 13
+    check "#transport" in readFile("tools/ci/renderer_fixture.html")
 
   test "the plate name shrinks instead of collapsing, and labels hide at 640":
     check ".plate-name {" in page

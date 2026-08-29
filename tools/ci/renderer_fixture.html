@@ -249,6 +249,41 @@
     return String(text).replace(/\s+/g, '');
   }
 
+  // ---- nothing this game positions may sit in the transport band --------
+  // relayout() measures #transport and publishes its height as --band; every
+  // overlay is supposed to ride `bottom: calc(var(--band, 0px) + …)`. A rule
+  // that forgets the term paints over the scrubber and the buttons, which no
+  // load signal, soak or screenshot notices. Measured here against
+  // #transport's own rect, at every width.
+  function checkBand(win, size) {
+    var doc = win.document;
+    var bar = doc.getElementById('transport');
+    if (!bar) {
+      fail('at ' + size[0] + 'px #transport is missing');
+      return;
+    }
+    var band = bar.getBoundingClientRect();
+    if (!band.height) return;                 // hidden: nothing to overlap
+    ['fpv', 'sk-ribbon', 'sk-pips', 'killfeed'].forEach(function (id) {
+      var node = doc.getElementById(id);
+      if (!node) return;
+      var style = win.getComputedStyle(node);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      var box = node.getBoundingClientRect();
+      if (!box.width || !box.height) return;
+      var overlapX = Math.min(box.right, band.right) -
+        Math.max(box.left, band.left);
+      var overlapY = Math.min(box.bottom, band.bottom) -
+        Math.max(box.top, band.top);
+      if (overlapX > 1 && overlapY > 1) {
+        fail('at ' + size[0] + 'px #' + id + ' overlaps the transport band by ' +
+          Math.round(overlapY) + 'px (band ' + Math.round(band.top) + '..' +
+          Math.round(band.bottom) + ', element ' + Math.round(box.top) + '..' +
+          Math.round(box.bottom) + ')');
+      }
+    });
+  }
+
   function checkSay(win, size) {
     // The fixture's OWN string, asserted at full length: a quietly shortened
     // remark leaves every other check passing while testing nothing.
@@ -368,6 +403,7 @@
       }
       checkSay(w, size);
       checkRuns(size, runs);
+      checkBand(w, size);
       if (!runs.length) {
         fail('at ' + size[0] + 'px the page drew no measurable text at all');
       }
