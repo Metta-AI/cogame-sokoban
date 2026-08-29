@@ -73,6 +73,18 @@ suite "manifest pins":
       check page.hasKey("id")
       check page.hasKey("title")
       check page["content"].kind == JObject
+    # `{"type":"text","value":...}`, the shape the acceptance checklist spells
+    # out, with the REAL document as the value — and pinned to the committed
+    # files so the manifest and the docs can never drift. (A `uri` value is
+    # the starter's shape and validates too; `text` is what the checklist
+    # names, and it is what the platform renders without a fetch.)
+    check docs["readme"]["type"].getStr() == "text"
+    check docs["readme"]["value"].getStr() == readFile("README.md")
+    let sources = ["docs/RULES.md", "docs/ACTIONS.md", "docs/LEVELS.md"]
+    for i, page in docs["pages"].getElems():
+      check page["content"]["type"].getStr() == "text"
+      check page["content"]["value"].getStr().len > 200
+      check page["content"]["value"].getStr() == readFile(sources[i])
 
   test "the replay viewer is the static bundle, declared under game":
     check manifest["game"]["replay_viewer"]["bundle"].getStr() ==
