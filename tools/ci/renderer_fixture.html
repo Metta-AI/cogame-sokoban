@@ -293,17 +293,39 @@
     document.getElementById('row').appendChild(cell);
 
     frame.addEventListener('load', function () {
-      // The bundle boots its wasm runtime asynchronously; poll for the chrome
-      // hook rather than racing it.
+      // WAIT FOR THE REAL PAGE TO BE PLAYING, not merely parsed. The shell
+      // sets data-replay-loaded on its first DRAWN frame, and that frame is
+      // also what hands the appended block its chrome context: the page's
+      // `install(PB_CTX)` call runs while the block is still unparsed, so the
+      // block only receives PB_CTX through `frame(s, PB_CTX, jumped)`. Drive
+      // it any earlier and every `ctx.pushFeed` / `ctx.banner` call is a
+      // silent no-op - which is exactly how this fixture used to "pass"
+      // while measuring nothing.
       var tries = 0;
       var timer = setInterval(function () {
         tries++;
         var w = frame.contentWindow;
+        var doc = w && w.document;
+        var root = doc && doc.documentElement;
         var chrome = w && w.SokobanChrome;
-        if (!chrome && tries < 120) return;
+        var error = root && root.getAttribute('data-replay-error');
+        var drawn = root &&
+          root.getAttribute('data-replay-loaded') === 'true';
+        if (error) {
+          clearInterval(timer);
+          fail('the bundle failed at ' + size[0] + 'px: ' + error);
+          finish();
+          return;
+        }
+        if ((!chrome || !drawn) && tries < 400) return;   // 40 s
         clearInterval(timer);
         if (!chrome) {
           fail('SokobanChrome never appeared at ' + size[0] + 'px');
+          finish();
+          return;
+        }
+        if (!drawn) {
+          fail('the bundle never drew a frame at ' + size[0] + 'px');
           finish();
           return;
         }

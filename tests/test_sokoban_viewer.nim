@@ -284,6 +284,10 @@ suite "the LLM-text class is covered, not merely flagged":
     check "feed-row.say" in fixture
     check "was shortened to" in fixture
     check "data-replay-error" in fixture
+    # And it drives the page only once the shell has DRAWN a frame: the
+    # appended block receives its chrome context through `frame(s, PB_CTX)`,
+    # so a fixture that runs earlier makes every pushFeed a silent no-op.
+    check "data-replay-loaded" in fixture
     # And it mirrors every line the page laid out into a MAIN-THREAD 2D
     # canvas, which is the only text `viewer_smoke.mjs` can see: this viewer
     # draws its board in a Worker's OffscreenCanvas, where the smoke reports
