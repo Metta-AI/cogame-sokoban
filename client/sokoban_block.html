@@ -249,6 +249,14 @@
 #stage.tiny .plate .lives-num { font-size: calc(13 * var(--u)); }
 #stage.tiny .plate .crates { margin-right: calc(3 * var(--u)); }
 #stage.tiny .crate-chip { width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
+/* The left column at `.tiny`, in one stack and in this order from the band up:
+   the 84u inset (band+22u .. band+106u), the pips (band+112u) and the ribbon
+   (band+124u) — a 6u gap, so the panel cannot ride up over the pips as the
+   band grows. It stays on the LEFT rather than in the note's "right gutter"
+   because relayout() sets #stage's width to the board's, so there is no
+   gutter INSIDE the stage for an absolutely positioned child, and the stage's
+   right edge at this density is the inherited #killfeed's (`right: 12u`,
+   190u wide). Left is the only column with room for it. */
 #stage.tiny #fpv { left: calc(4 * var(--u)); bottom: calc(var(--band, 0px) + 22 * var(--u)); }
 #stage.tiny #fpv {
   width: calc(84 * var(--u)) !important;
