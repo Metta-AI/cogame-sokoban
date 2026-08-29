@@ -2,7 +2,7 @@
 ## strict-UTF-8 JSON summary, determinism from the bytes alone, and the
 ## GameVersion sweep.
 
-import std/[json, os, osproc, strutils, unicode, unittest]
+import std/[json, os, osproc, sequtils, strutils, unicode, unittest]
 import sokoban/[sim, replay_runtime, replays]
 import helpers
 
@@ -25,8 +25,18 @@ suite "record then re-derive, every end reason":
       of "ladderComplete":
         episode = runEpisode(cfg, blPusher, record = true)
       of "turnCap":
-        episode = runEpisode(cfg, blPusher, record = true, stopAtTurn = 60,
-                             stopReason = endComplete, stopRule = erTurnCap)
+        # The SHIPPED shape, which the old scenario could not produce: the turn
+        # cap fires with a level still in play and the server writes NO stop
+        # record (it writes one only when the reason is not `complete`), so
+        # playback has to settle from the records running out. `stopAtTurn: 60`
+        # never fired here at all — the pusher finishes the ladder first — so
+        # this scenario was a second copy of `ladderComplete`.
+        var capped = cfg
+        capped.maxTurns = 3
+        episode = runEpisode(capped, blPusher, record = true)
+        check episode.sim.endRule == erTurnCap
+        check parseReplayBytes(episode.replay).records.allIt(
+          it.kind != rkStop)
       of "wallClock":
         episode = runEpisode(cfg, blPusher, record = true, stopAtTurn = 5,
                              stopReason = endDeadline, stopRule = erWallClock)

@@ -121,6 +121,19 @@ proc stepReplay*(player: var ReplayPlayer, sim: SimServer) =
   if not sim.levelActive and not sim.needsLevel():
     sim.settle(endComplete, erLadderComplete)
     return
+  ## THE RECORDS ARE THE WHOLE INPUT LOG. When they run out with the current
+  ## turn fully played, the episode is over even though a level is still in
+  ## play: that is the TURN CAP, for which the server writes no stop record
+  ## (it writes one only when the reason is not `complete`,
+  ## `server.nim:386-390`). Stepping on would spend `wait` primitives the
+  ## episode never spent — changing that level's outcome and inventing ticks
+  ## past the recorded hash chain. The end rule is derived the same way the
+  ## server derives it: `ladderComplete` if the ladder finished, else
+  ## `turnCap`.
+  if player.recordIndex >= player.data.records.len and sim.turnComplete():
+    sim.settle(endComplete,
+               if sim.ladderComplete(): erLadderComplete else: erTurnCap)
+    return
   let before = sim.tick
   sim.stepTick()
   if sim.tick == before:
