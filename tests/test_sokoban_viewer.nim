@@ -56,6 +56,20 @@ suite "broadcast html is the starter plus a block":
     let script = readFile("scripts/build_broadcast_page.py")
     check "replay_broadcast.html" in script
     check "PaintballChrome" in script
+    # A starter MOVES. Without the revision this page was derived from, the
+    # provenance claim cannot be re-run at all: coworld-ctf added a TK column
+    # to the endcard header after this fork was taken and the script stopped
+    # matching its own anchor. The sha is recorded so the rebuild is checkable
+    # against the exact bytes the fork was taken from.
+    const Marker = "STARTER_SHA = \""
+    check Marker in script
+    let shaAt = script.find(Marker) + Marker.len
+    check script.len > shaAt + 40
+    let sha = script[shaAt ..< shaAt + 40]
+    for ch in sha:
+      check ch in HexDigits
+    check script[shaAt + 40] == '"'
+    check sha in readFile("README.md")
 
   test "broadcast_core keeps the starter's parser and pushFeed's signature":
     for anchor in ["function BroadcastCore(config)", "function parse(bytes)",

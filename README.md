@@ -119,8 +119,15 @@ The chrome is `coworld-ctf`'s, not a lookalike: `client/chrome_common.js` is
 byte-for-byte the starter's (its sha256 is pinned as a literal in
 `tests/test_sokoban_viewer.nim`), and `client/replay_broadcast.html` is the
 starter's page with this game's block appended under a banner comment.
-`scripts/build_broadcast_page.py` derives it from a fresh checkout of the
-starter, so the provenance is mechanical and checkable.
+`scripts/build_broadcast_page.py` derives it from the starter, so the
+provenance is mechanical and checkable — and the starter revision it was
+derived from is recorded in the script as `STARTER_SHA`
+(`a7484eb47b14bde20678ff106c684a633b4f294c`), so the claim can be re-run:
+
+    git -C <coworld-ctf> show a7484eb:client/replay_broadcast.html > /tmp/p.html
+    python3 scripts/build_broadcast_page.py /tmp/p.html /tmp/rebuilt.html \
+        client/sokoban_block.html
+    diff /tmp/rebuilt.html client/replay_broadcast.html    # empty
 
 ## Board art
 

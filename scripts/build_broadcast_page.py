@@ -13,15 +13,38 @@ The page is NOT written from scratch. It is the starter's broadcast page with
 
 A page written from scratch that reuses the starter's ids is a rewrite and
 fails review (cogame-gridlock, 2026-08-23), so this script exists to make the
-provenance mechanical and checkable: run it against a fresh checkout of
-coworld-ctf and it reproduces the shipped file.
+provenance mechanical and checkable: run it against the starter and it
+reproduces the shipped file byte for byte.
+
+THE STARTER REVISION THIS PAGE WAS DERIVED FROM is recorded here, because a
+starter moves: `client/replay_broadcast.html` in this repo is exactly this
+script's output against `Metta-AI/coworld-ctf` at
+
+    STARTER_SHA = a7484eb47b14bde20678ff106c684a633b4f294c   (2026-08-28)
+
+Re-verify it with:
+
+    git -C /workspace/starters/coworld-ctf show \
+        a7484eb:client/replay_broadcast.html > /tmp/starter_page.html
+    python3 scripts/build_broadcast_page.py /tmp/starter_page.html \
+        /tmp/rebuilt.html client/sokoban_block.html
+    diff /tmp/rebuilt.html client/replay_broadcast.html    # empty
+
+It also runs against a LATER starter revision — the anchors that the starter
+has since edited are matched by shape rather than by exact text — but the
+output then carries the starter's own later changes and is no longer identical
+to the shipped page. That is the point: the diff is the starter's, not this
+fork's.
 
     python3 scripts/build_broadcast_page.py \
         /workspace/starters/coworld-ctf/client/replay_broadcast.html \
         client/replay_broadcast.html client/sokoban_block.html
 """
 
+import re
 import sys
+
+STARTER_SHA = "a7484eb47b14bde20678ff106c684a633b4f294c"
 
 
 def cut(text, start, end, note, inclusive_end=True):
@@ -42,6 +65,23 @@ def swap(text, old, new, count=None):
         assert found == count, "%d occurrences of %r, expected %d" % (
             found, old[:50], count)
     return text.replace(old, new)
+
+
+def swap_re(text, pattern, new, count=1):
+    """Replaces an anchor the starter still edits, matched by SHAPE.
+
+    An exact-text anchor over a line the starter is still changing turns this
+    script into a one-revision tool: coworld-ctf added a `TK` column to the
+    endcard header after this fork was taken (`ed3bd67`) and the exact anchor
+    stopped matching, so the provenance claim became unrunnable. The columns
+    are replaced wholesale here anyway, so the anchor only has to identify the
+    line, not spell it.
+    """
+    found = re.findall(pattern, text)
+    assert found, "regex anchor not found: " + pattern[:70]
+    assert len(found) == count, "%d matches of %r, expected %d" % (
+        len(found), pattern[:50], count)
+    return re.sub(pattern, new.replace("\\", "\\\\"), text)
 
 
 def main():
@@ -189,12 +229,14 @@ def main():
                 "<span class=\"fl-cap\">Levels solved</span>", 1)
     page = swap(page, "<span class=\"fl-cap\">Hill time</span>",
                 "<span class=\"fl-cap\">Pushes made</span>", 1)
-    page = swap(page,
-                "'<div class=\"ec-thead\"><span>Player</span><span>K</span>"
-                "<span>D</span><span>Clstr</span><span>Cap</span></div>'",
-                "'<div class=\"ec-thead\"><span>Level</span><span>Tier</span>"
-                "<span>Result</span><span>Moves</span><span>Crates</span>"
-                "</div>'", 1)
+    # The ctf endcard header, whatever columns the starter currently gives it
+    # (it gained a TK column in ed3bd67): every column is replaced.
+    page = swap_re(page,
+                   r"'<div class=\"ec-thead\"><span>Player</span>"
+                   r"(?:<span>[A-Za-z]+</span>)+</div>'",
+                   "'<div class=\"ec-thead\"><span>Level</span>"
+                   "<span>Tier</span><span>Result</span><span>Moves</span>"
+                   "<span>Crates</span></div>'")
     page = swap(page,
                 "'<div class=\"ec-thead\"><span>Cog</span><span>Tags</span>"
                 "<span>Out</span><span>Paint</span></div>'",
