@@ -53,7 +53,11 @@ proc runEpisode*(
     if not sim.levelActive:
       break
     if stopAtTurn >= 0 and sim.turnsPlayed >= stopAtTurn:
-      if record:
+      if record and stopReason != endComplete:
+        ## PARITY WITH THE SERVER, which writes a stop record only when the
+        ## reason is not `complete` (`server.nim:386-390`). Writing one for
+        ## every forced stop made the `turnCap` round trip exercise a byte
+        ## shape the shipped server never produces.
         writer.writeStop(StopRecord(
           tick: sim.tick, reason: stopReason, endRule: stopRule,
           detail: "forced stop"))
@@ -79,7 +83,10 @@ proc runEpisode*(
         break
     sim.endTurn(plan.notes)
     discard sim.drainEvents()
-  sim.settle(endComplete, erLadderComplete)
+  ## The server's own end-rule derivation (`server.nim:377-378`): a `complete`
+  ## episode that stopped without finishing the ladder stopped on the TURN CAP.
+  sim.settle(endComplete,
+             if sim.ladderComplete(): erLadderComplete else: erTurnCap)
   if record:
     writer.writeChat(sim.tick, "{\"k\":\"result\",\"results\":" &
       $sim.ladderResultsJson() & "}")
