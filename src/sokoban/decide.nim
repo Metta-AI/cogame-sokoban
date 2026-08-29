@@ -104,7 +104,7 @@ proc directiveRecord*(
     "pushes": sim.lastReport.pushes,
     "blocked": sim.lastReport.blocked,
     "truncated": sim.lastReport.truncated,
-    "dropped": directive.dropped + directive.overCap,
+    "dropped": sim.lastReport.dropped,
     "unreachable": sim.lastReport.unreachable,
     "say": directive.say
   }

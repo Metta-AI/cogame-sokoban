@@ -76,6 +76,35 @@ suite "pushes_available is exactly the legal set":
         check not entry.hasKey("safe")
       check got == expected
 
+suite "last_turn reports the seat's own turn accurately":
+  test "dropped counts the entries the reply lost, and matches the replay":
+    # Both champion prompts tell the seat to read `last_turn`; a hard-coded
+    # zero would silently disable that self-correction loop.
+    let cfg = defaultConfig()
+    let levels = levelsFor(cfg.seed, cfg)
+    let sim = newSimServer(cfg)
+    sim.phase = phPlaying
+    sim.startLevel(levels[0])
+    # Two entries that fail validation (box 9 is out of range, `sideways` is
+    # not a direction) plus one past a cap of two.
+    let payload = parseJson("""{"actions":[
+      {"do":"push","box":9,"dir":"R"},
+      {"do":"push","box":2,"dir":"sideways"},
+      {"do":"wait"},
+      {"do":"wait"},
+      {"do":"wait"}]}""")
+    var directive = parseDirective(payload, 2)
+    check directive.dropped == 2
+    check directive.overCap == 1
+    sim.beginTurn(directive)
+    while not sim.turnComplete():
+      sim.stepTick()
+    sim.endTurn("")
+    check sim.lastReport.dropped == directive.dropped + directive.overCap
+    let view = sim.observationJson(0)
+    check view["last_turn"]["dropped"].getInt() == 3
+    check view["last_turn"]["unreachable"].getInt() == sim.turnUnreachable
+
 suite "nothing hidden leaks":
   test "the observation names no seed, no future level, no solution, no score":
     let cfg = defaultConfig()

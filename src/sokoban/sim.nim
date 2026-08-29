@@ -75,6 +75,8 @@ type
     queueIndex*: int
     turnTruncated*: bool
     turnUnreachable*: int
+    turnDropped*: int         ## entries this turn's reply lost: failed
+                              ## validation plus the ones past the cap
     turnPushes*: int
     turnBlocked*: int
     turnExecuted*: string
@@ -271,6 +273,7 @@ proc beginTurn*(sim: SimServer, directive: Directive) =
   sim.queueIndex = 0
   sim.turnTruncated = expansion.truncated
   sim.turnUnreachable = expansion.unreachable
+  sim.turnDropped = directive.dropped + directive.overCap
   sim.turnPushes = 0
   sim.turnBlocked = 0
   sim.turnExecuted = ""
@@ -384,13 +387,18 @@ proc turnComplete*(sim: SimServer): bool =
   sim.turnEnded or sim.queueIndex >= sim.config.turnMoves
 
 proc endTurn*(sim: SimServer, notes: string) =
-  ## Records what the seat is told about its own last turn.
+  ## Records what the seat is told about its own last turn. `dropped` is the
+  ## REAL count — the entries that failed validation plus the ones past
+  ## `maxActionsPerTurn` — and it is the same number the replay's `directive`
+  ## record carries (`decide.nim`'s `directiveRecord`). Both champion prompts
+  ## tell the seat to read `last_turn`, so a hard-coded zero would silently
+  ## disable the self-correction loop for every malformed entry.
   sim.lastReport = TurnReport(
     executed: sim.turnExecuted,
     pushes: sim.turnPushes,
     blocked: sim.turnBlocked,
     truncated: sim.turnTruncated,
-    dropped: 0,
+    dropped: sim.turnDropped,
     unreachable: sim.turnUnreachable,
     notes: notes,
     valid: true)
