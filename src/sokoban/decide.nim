@@ -145,9 +145,16 @@ proc turn*(
   ## the replay chat records the turn produced. NEVER RAISES: every failure path
   ## ends in a legal directive.
   const seat = 0
-  let
-    budget = initDuration(milliseconds = max(1, sim.config.turnBudgetMs))
-    turnStart = getMonoTime()
+  let budget = initDuration(milliseconds = max(1, sim.config.turnBudgetMs))
+  ## `turnBudgetMs` is the deadline around the DECISION — the attempt and its
+  ## single retry — which is the invariant `sim_config.validate` enforces
+  ## (`attempt1Ms + retryMs <= turnBudgetMs`). It is taken below, AFTER the
+  ## `turnSpacingMs` rate floor, because that sleep is not part of the
+  ## decision: it is a deliberate, separately bounded rate limit, and counting
+  ## it inside the budget would silently shorten the retry on exactly the
+  ## turns that had to wait. The two bounds are added explicitly in the budget
+  ## guard below, so the episode arithmetic still holds.
+  var turnStart = getMonoTime()
   ## Throttle state is PER TURN: a 429 on turn k says nothing about turn k+1.
   engine.client.throttled = false
   result.view = sim.observationJson(seat)
@@ -171,8 +178,16 @@ proc turn*(
       directive
 
   # --- budget guard: settle EARLY rather than overrun ----------------------
+  ## The reserve is the REAL worst case of a turn: the rate floor plus the
+  ## whole decision budget. A turn that burns both attempts costs
+  ## `turnBudgetMs`, and a turn that follows a fast one additionally pays up to
+  ## `turnSpacingMs` before it starts, so two more turns can cost
+  ## `2 x (turnSpacingMs + turnBudgetMs)` = 23.2 s, not the 18 s the budget
+  ## alone reserves. Reserving the smaller figure is how the guard lets the
+  ## episode reach the engine's hard stop instead of settling ahead of it.
   if not engine.llmOff:
-    let turnSeconds = (sim.config.turnBudgetMs + 999) div 1000
+    let turnSeconds = (sim.config.turnBudgetMs + 999) div 1000 +
+      (max(0, sim.config.turnSpacingMs) + 999) div 1000
     if elapsedSeconds + 2 * turnSeconds > sim.config.wallClockBudgetSeconds:
       engine.llmOff = true
       engine.records.add(budgetGuardRecord(
@@ -215,6 +230,8 @@ proc turn*(
       sleep(min(sim.config.turnSpacingMs, sim.config.turnSpacingMs - since))
   engine.lastBatchStart = getMonoTime()
   engine.batchStarted = true
+  ## The decision deadline starts here, after the rate floor.
+  turnStart = getMonoTime()
 
   var
     attempt = 0
