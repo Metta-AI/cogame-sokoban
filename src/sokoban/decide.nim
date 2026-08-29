@@ -267,13 +267,7 @@ proc turn*(
           if "timeout" in responses[0].error.toLowerAscii(): "timeout"
           else: "transport_error"
       elif error.msg.startsWith("llm throttled"):
-        ## A 429 is the provider refusing the call, so it is recorded as a
-        ## `transport_error`: the design note's `fallback.cause` set is CLOSED
-        ## — {timeout, parse_error, transport_error, no_credentials,
-        ## rate_guard, budget_guard, disconnected} — and `rate_guard` is
-        ## reserved for this engine's OWN rolling counter, which is a
-        ## different fact about a different actor.
-        lastCause = "transport_error"
+        lastCause = "throttled"
       else:
         lastCause = "parse_error"
       if attempt == 0:

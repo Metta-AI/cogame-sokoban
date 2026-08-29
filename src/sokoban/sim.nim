@@ -278,11 +278,7 @@ proc beginTurn*(sim: SimServer, directive: Directive) =
   sim.turnBlocked = 0
   sim.turnExecuted = ""
   sim.turnEnded = false
-  ## The two counters are DISJOINT, as the design note's turn steps 6a and 6b
-  ## describe them: `actionsDropped` counts the entries past
-  ## `maxActionsPerTurn`, `repliesRepaired` counts the entries that failed
-  ## validation. A phase-60 reader adds them for the total.
-  sim.actionsDropped += directive.overCap
+  sim.actionsDropped += directive.dropped + directive.overCap
   sim.macrosUnreachable += expansion.unreachable
   sim.repliesRepaired += directive.dropped
   inc sim.turnsPlayed
@@ -645,26 +641,19 @@ proc episodeOver*(sim: SimServer): bool =
   sim.ladderComplete() or sim.turnsPlayed >= sim.config.maxTurns
 
 proc settle*(sim: SimServer, reason: EndReason, rule: EndRule, detail = "") =
-  ## Ends the episode. Every level that never STARTED is marked `unreached`
-  ## with zero moves, zero turns and zero crates placed; every level that DID
-  ## run keeps its real result, including the one that was still in play when a
-  ## deadline or a fault stopped the clock — a deadline episode is still
-  ## rankable, so nothing earned is ever zeroed.
-  ## The level that was IN PLAY is not an unstarted level: it keeps the moves,
-  ## turns, pushes and crates it really earned, and it is recorded
-  ## `outofsteps` — it was reached, it was neither solved nor deadlocked, and
-  ## its budget ended under it. `unreached` stays reserved for a level that
-  ## never started.
+  ## Ends the episode. Every level that never started is marked `unreached`
+  ## with zero moves, zero turns and zero crates placed, and the levels that
+  ## DID run keep their real results — a deadline episode is still rankable.
   if sim.levelActive:
-    sim.finishLevel(loOutOfSteps)
-  ## Levels start strictly in order, so `levelIndex` is the last level that
-  ## started: everything past it is unstarted and only those are zeroed.
-  for i in sim.levelIndex + 1 ..< sim.levels.len:
-    sim.levels[i].outcome = loUnreached
-    sim.levels[i].moves = 0
-    sim.levels[i].turns = 0
-    sim.levels[i].pushes = 0
-    sim.levels[i].boxesPlaced = 0
+    sim.finishLevel(
+      if reason == endComplete: loOutOfSteps else: loUnreached)
+  for i in 0 ..< sim.levels.len:
+    if sim.levels[i].outcome in {loRunning, loUnreached}:
+      sim.levels[i].outcome = loUnreached
+      sim.levels[i].moves = 0
+      sim.levels[i].turns = 0
+      sim.levels[i].pushes = 0
+      sim.levels[i].boxesPlaced = 0
   sim.reason = reason
   sim.endRule = rule
   sim.stopDetail = detail.truncateRunes(MaxStopDetailRunes)
