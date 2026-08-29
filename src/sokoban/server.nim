@@ -178,10 +178,21 @@ proc finishEpisode(writer: ReplayWriter, log: EventLog) =
   ## The REPLAY first, then the results: the hosted worker treats results.json
   ## as the end of the episode and tears the pods down when it appears, so a
   ## replay written after it can be lost.
-  writeArtifact(runtimeCfg.replayUri, replayData, "application/octet-stream",
-    "COGAME_SAVE_REPLAY_METHOD")
-  writeArtifact(runtimeCfg.resultsUri, $results, "application/json",
-    "COGAME_RESULTS_METHOD")
+  ##
+  ## The two writes are INDEPENDENT. `writeArtifact` raises on a non-2xx POST,
+  ## and a failed replay upload must not also cost the results document — the
+  ## design note's `fault` rule is "artifacts are still written, exit 0", and
+  ## `results.json` is what the platform scores the episode from.
+  try:
+    writeArtifact(runtimeCfg.replayUri, replayData, "application/octet-stream",
+      "COGAME_SAVE_REPLAY_METHOD")
+  except CatchableError as error:
+    echo "sokoban: replay write FAILED — ", error.msg
+  try:
+    writeArtifact(runtimeCfg.resultsUri, $results, "application/json",
+      "COGAME_RESULTS_METHOD")
+  except CatchableError as error:
+    echo "sokoban: results write FAILED — ", error.msg
   if eventsSinkPath.len > 0:
     try:
       writeFile(eventsSinkPath, log.eventsJsonl(gameSim.tick))
@@ -372,11 +383,24 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
       detail = error.msg
       echo "sokoban: FAULT — ", error.msg
 
-    if reason != endComplete:
-      writer.writeStop(StopRecord(
-        tick: gameSim.tick, reason: reason, endRule: rule, detail: detail))
-    gameSim.settle(reason, rule, detail)
-    finishEpisode(writer, log)
+    ## THE SETTLE AND THE ARTIFACT WRITE ARE INSIDE THE FAULT GUARD TOO. The
+    ## design note's `fault` rule is "caught; the episode is settled from the
+    ## last completed tick, artifacts are still written, exit 0" — and the
+    ## stop record, `settle` and `finishEpisode` can all raise: `writeArtifact`
+    ## raises `IOError` on a non-2xx POST. An exception here used to propagate
+    ## out of `runGame` on the game thread with no results, no replay and no
+    ## exit 0.
+    try:
+      if reason != endComplete:
+        writer.writeStop(StopRecord(
+          tick: gameSim.tick, reason: reason, endRule: rule, detail: detail))
+      gameSim.settle(reason, rule, detail)
+      finishEpisode(writer, log)
+    except CatchableError as error:
+      ## Nothing here may take the game thread down: the episode still exits 0
+      ## after the shutdown grace, so `/healthz` and `/global` keep answering
+      ## and the platform sees a finished pod rather than a crashed one.
+      echo "sokoban: FAULT while settling — ", error.msg
     ## Keep /healthz and /global answering for a bounded grace after the
     ## artifacts are written, then exit.
     sleep(ShutdownGraceSeconds * 1000)
