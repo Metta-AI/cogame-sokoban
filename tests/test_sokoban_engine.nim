@@ -185,7 +185,7 @@ suite "no seat can stall":
     # `/player?slot&token&name=` route — and only falls back to the policy
     # label when nothing named the seat.
     let source = readFile("src/sokoban/server.nim")
-    check "queryParams.getOrDefault(\"name\", \"\")" in source
+    check "request.queryParams[\"name\"]" in source
     check "shared.names[slot] = declaredName" in source
     check "shared.names[slot] = registeredName" in source
     # And the alias never leaks into that space.
