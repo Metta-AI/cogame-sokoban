@@ -339,6 +339,14 @@ jobs:
       # particle-worlds 2026-08-26 scar) - driving the real page with a
       # full-cap 140-rune say, a fully hatched dead-square board, a DEADLOCK
       # CREATED banner, all six level-pip states and a deadlocked endcard.
+      #
+      # It then ASSERTS the say survived at full length and that every line
+      # the page laid out sits inside the frame, and MIRRORS each of those
+      # lines into a main-thread 2D canvas the size of the frame, in the font
+      # and at the box the page gave it. That is what gives
+      # --strict-text-bounds something to measure here: this viewer draws its
+      # board in a Worker's OffscreenCanvas, which viewer_smoke.mjs cannot
+      # see, and where `canvas_text: 0 drawn` means the check covered nothing.
       - name: Drive the shipped chrome with a worst-case frame
         run: |
           set -euo pipefail

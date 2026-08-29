@@ -4,11 +4,19 @@
 <meta charset="utf-8">
 <title>Sokoban renderer fixture</title>
 <style>
+  /* The same face the shipped page loads, from the same directory, so the
+     mirror canvas below measures the LLM text in the font it was really laid
+     out in rather than in a fallback. */
+  @font-face {
+    font-family: 'rajdhani';
+    src: url('./font.ttf') format('truetype');
+    font-display: block;
+  }
   html, body { margin: 0; background: #0b0704; color: #f2e8d8;
     font: 12px system-ui, sans-serif; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
   .cell { border: 1px solid #3a2c1e; }
-  .cell iframe { border: 0; display: block; }
+  .cell iframe, .cell canvas { border: 0; display: block; }
   .cap { padding: 2px 4px; color: #8a7f72; letter-spacing: 0.08em; }
 </style>
 </head>
@@ -30,6 +38,24 @@
   never contain: a full-cap 140-rune `say`, a fully hatched dead-square board,
   a DEADLOCK CREATED banner, all six level-pip states, all three tier names
   and a deadlocked endcard - at 360 px, 640 px and 1280 px.
+
+  IT THEN CHECKS WHAT WAS DRAWN, two ways, because this viewer renders its
+  BOARD inside a Worker's OffscreenCanvas and its TEXT in the DOM, and
+  viewer_smoke.mjs only sees main-thread 2D `fillText`: on the shipped bundle
+  it reports `canvas_text: 0 drawn`, which by its own header "is itself the
+  signal that this check did not cover it". So:
+
+    1. ASSERTIONS. The `say` row the real page rendered must contain all 140
+       runes, unshortened and un-ellipsized, and every text line the page laid
+       out in the feed, the banner lane and the level ribbon must sit inside
+       the frame. A failure sets data-replay-error with the offending string.
+
+    2. A MIRROR CANVAS. Every one of those lines is re-drawn into a main-thread
+       2D canvas THE SIZE OF THE FRAME, at the box and in the font the page
+       gave it (per-line, so a wrapped row mirrors line for line). That is what
+       gives `viewer_smoke.mjs --strict-text-bounds` something real to measure:
+       a line the page pushed off the frame lands off the canvas, `never_inside`
+       is nonzero and the step is red.
 -->
 <div class="row" id="row"></div>
 <script>
@@ -117,14 +143,18 @@
     };
   }
 
+  var SAY_EVENT = { k: 'say', t: 10, text: SAY };
+  var DEADLOCK_EVENT = { k: 'deadlock', t: 30, kind: 'frozen_block',
+                         box: 2, x: 7, y: 1 };
+
   var EVENTS = [
     { k: 'levelstart', t: 0, i: 4, tier: 'hard', optPushes: 26 },
-    { k: 'say', t: 10, text: SAY },
+    SAY_EVENT,
     { k: 'plan', t: 12, n: 23, moves: 20, actions: 4, truncated: true,
       dropped: 1, unreachable: 1, source: 'llm' },
     { k: 'boxon', t: 20, box: 1, x: 7, y: 4, placed: 2 },
     { k: 'boxoff', t: 24, box: 0, x: 3, y: 3, placed: 1 },
-    { k: 'deadlock', t: 30, kind: 'frozen_block', box: 2, x: 7, y: 1 },
+    DEADLOCK_EVENT,
     { k: 'failed', t: 31, i: 4, why: 'deadlocked' },
     { k: 'fallback', t: 32, cause: 'timeout' },
     { k: 'solved', t: 33, i: 3, moves: 126, pushes: 21, turns: 7 },
@@ -133,8 +163,120 @@
       solved: 2, of: 6, weight: 3, maxWeight: 12, score: 3170382 }
   ];
 
+  // The chrome the fixture measures: the LLM's own line and the level
+  // narration around it. Everything here is text the page lays out itself.
+  var MEASURED = ['#killfeed', '#bannerlane', '#sk-ribbon'];
+
   var pending = WIDTHS.length;
   var failed = null;
+
+  function fail(message) {
+    if (!failed) failed = message;
+  }
+
+  // ---- per-LINE text runs, in the frame's own coordinates ---------------
+  // A range over one character gives its line box, so consecutive characters
+  // with the same top are one rendered line. That is what makes a WRAPPED row
+  // mirror faithfully instead of being redrawn as one impossible line.
+  function textRuns(win, root) {
+    var doc = win.document;
+    var runs = [];
+    var walker = doc.createTreeWalker(root, 4 /* SHOW_TEXT */, null, false);
+    var range = doc.createRange();
+    for (var node = walker.nextNode(); node; node = walker.nextNode()) {
+      var data = node.data || '';
+      if (!data.trim()) continue;
+      var parent = node.parentElement;
+      if (!parent) continue;
+      var style = win.getComputedStyle(parent);
+      if (style.visibility === 'hidden' || style.display === 'none') continue;
+      if (parseFloat(style.opacity) === 0) continue;
+      var font = [style.fontStyle, style.fontWeight, style.fontSize,
+                  style.fontFamily].join(' ');
+      var current = null;
+      for (var i = 0; i < data.length; i++) {
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        var box = range.getBoundingClientRect();
+        // Collapsed whitespace has no box; it is not drawn, so it is not
+        // mirrored either.
+        if (!box.width && !box.height) continue;
+        if (!current || Math.abs(box.top - current.top) > 0.75) {
+          current = { text: '', font: font, left: box.left, top: box.top,
+                      right: box.right, bottom: box.bottom };
+          runs.push(current);
+        }
+        current.text += data[i];
+        current.right = Math.max(current.right, box.right);
+        current.bottom = Math.max(current.bottom, box.bottom);
+      }
+    }
+    return runs;
+  }
+
+  function mirror(cell, size, runs) {
+    var canvas = document.createElement('canvas');
+    canvas.width = size[0];
+    canvas.height = size[1];
+    cell.appendChild(canvas);
+    var c = canvas.getContext('2d');
+    c.fillStyle = '#0b0704';
+    c.fillRect(0, 0, canvas.width, canvas.height);
+    c.textAlign = 'left';
+    c.textBaseline = 'top';
+    c.fillStyle = '#f2e8d8';
+    for (var i = 0; i < runs.length; i++) {
+      c.font = runs[i].font;
+      c.fillText(runs[i].text, runs[i].left, runs[i].top);
+    }
+  }
+
+  function checkRuns(size, runs) {
+    for (var i = 0; i < runs.length; i++) {
+      var run = runs[i];
+      if (run.left < -1 || run.top < -1 ||
+          run.right > size[0] + 1 || run.bottom > size[1] + 1) {
+        fail('at ' + size[0] + 'px a drawn line left the frame [' +
+          Math.round(run.left) + ',' + Math.round(run.top) + ' -> ' +
+          Math.round(run.right) + ',' + Math.round(run.bottom) + '] in ' +
+          size[0] + 'x' + size[1] + ': ' + JSON.stringify(run.text.slice(0, 60)));
+        return;
+      }
+    }
+  }
+
+  function bare(text) {
+    return String(text).replace(/\s+/g, '');
+  }
+
+  function checkSay(win, size) {
+    // The fixture's OWN string, asserted at full length: a quietly shortened
+    // remark leaves every other check passing while testing nothing.
+    var rows = win.document.querySelectorAll('#killfeed .feed-row.say');
+    if (!rows.length) {
+      fail('at ' + size[0] + 'px the say row never reached #killfeed');
+      return;
+    }
+    var row = rows[0];   // pushFeed inserts the newest row first
+    var text = row.textContent || '';
+    if (bare(text).indexOf(bare(SAY)) < 0) {
+      fail('at ' + size[0] + 'px the 140-rune say was shortened to ' +
+        Array.from(text).length + ' runes: ' + JSON.stringify(text.slice(0, 80)));
+      return;
+    }
+    if (text.indexOf('\u2026') >= 0) {
+      fail('at ' + size[0] + 'px the say row was ellipsized: ' +
+        JSON.stringify(text.slice(0, 80)));
+      return;
+    }
+    var box = row.getBoundingClientRect();
+    if (box.left < -1 || box.right > size[0] + 1 ||
+        box.top < -1 || box.bottom > size[1] + 1) {
+      fail('at ' + size[0] + 'px the say row is outside the frame [' +
+        Math.round(box.left) + ',' + Math.round(box.top) + ' -> ' +
+        Math.round(box.right) + ',' + Math.round(box.bottom) + ']');
+    }
+  }
 
   WIDTHS.forEach(function (size) {
     var cell = document.createElement('div');
@@ -161,24 +303,64 @@
         if (!chrome && tries < 120) return;
         clearInterval(timer);
         if (!chrome) {
-          failed = 'SokobanChrome never appeared at ' + size[0] + 'px';
+          fail('SokobanChrome never appeared at ' + size[0] + 'px');
           finish();
           return;
         }
-        try {
-          var playing = state('playing');
-          chrome.frame(playing, null, false);
-          for (var i = 0; i < EVENTS.length; i++) {
-            chrome.event(EVENTS[i], playing, null);
-          }
-          chrome.frame(state('gameover'), null, false);
-        } catch (err) {
-          failed = String(err && err.message ? err.message : err);
-        }
-        finish();
+        // Web fonts change every metric, so nothing is measured until the
+        // page's own face has loaded.
+        var ready = (w.document.fonts && w.document.fonts.ready) ||
+          Promise.resolve();
+        // The mirror canvas draws in the page's own face, so it has to be
+        // LOADED in this document too: a canvas `font` assignment kicks off
+        // the fetch asynchronously and the first fillText would otherwise
+        // measure a fallback.
+        ready.then(function () { return document.fonts.load('16px rajdhani'); })
+          .then(function () {
+            drive(w, chrome, cell, size);
+            finish();
+          }, function () {
+            drive(w, chrome, cell, size);
+            finish();
+          });
       }, 100);
     });
   });
+
+  function drive(w, chrome, cell, size) {
+    var runs = [];
+    try {
+      var playing = state('playing');
+      chrome.frame(playing, null, false);
+      for (var i = 0; i < EVENTS.length; i++) {
+        chrome.event(EVENTS[i], playing, null);
+      }
+      // The inherited feed keeps four rows, so the two the fixture exists to
+      // measure - the model's own line and the deadlock call - are re-issued
+      // last and measured before anything can evict them.
+      chrome.event(DEADLOCK_EVENT, playing, null);
+      chrome.event(SAY_EVENT, playing, null);
+      for (var m = 0; m < MEASURED.length; m++) {
+        var root = w.document.querySelector(MEASURED[m]);
+        if (root) runs = runs.concat(textRuns(w, root));
+      }
+      checkSay(w, size);
+      checkRuns(size, runs);
+      if (!runs.length) {
+        fail('at ' + size[0] + 'px the page drew no measurable text at all');
+      }
+      chrome.frame(state('gameover'), null, false);
+    } catch (err) {
+      fail(String(err && err.message ? err.message : err));
+    }
+    // Mirrored even on failure: the artifact screenshot is most useful when
+    // the step is red.
+    try {
+      mirror(cell, size, runs);
+    } catch (err) {
+      fail('mirror failed at ' + size[0] + 'px: ' + String(err));
+    }
+  }
 
   function finish() {
     pending--;

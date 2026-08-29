@@ -261,6 +261,39 @@ suite "endcard labels":
     # and the game block.
     check page.count("<span class=\"fl-cap\">Levels solved</span>") == 2
 
+suite "the LLM-text class is covered, not merely flagged":
+  test "the say row has a reserved band sized from the server's own cap":
+    let bannerAt = page.find(BannerMarker)
+    let gameBlock = page[bannerAt .. ^1]
+    # The inherited feed row is `white-space: nowrap` and sized to content —
+    # right for a pre-bounded 10-character name, wrong for a 140-rune
+    # sentence, which at 360 px grows leftward off the frame. The say row
+    # wraps inside the column #killfeed already reserves.
+    check "#killfeed .feed-row.say" in gameBlock
+    check "white-space: normal;" in gameBlock
+    check "MaxSayRunes" in gameBlock
+
+  test "the worst-case fixture drives the shipped page and measures it":
+    let fixture = readFile("tools/ci/renderer_fixture.html")
+    # It loads the SHIPPED bundle rather than re-implementing the drawing.
+    check "./index.html?replay=" in fixture
+    # Its own string is the server's cap, and it asserts it survived at full
+    # length — a quietly shortened remark leaves a fixture passing while
+    # testing nothing.
+    check "Array.from(SAY).slice(0, 140)" in fixture
+    check "feed-row.say" in fixture
+    check "was shortened to" in fixture
+    check "data-replay-error" in fixture
+    # And it mirrors every line the page laid out into a MAIN-THREAD 2D
+    # canvas, which is the only text `viewer_smoke.mjs` can see: this viewer
+    # draws its board in a Worker's OffscreenCanvas, where the smoke reports
+    # `total: 0` and covers nothing.
+    check "getContext('2d')" in fixture
+    check "fillText" in fixture
+    let workflow = readFile(".github/workflows/ci.yml")
+    check "renderer_fixture.html" in workflow
+    check workflow.count("\n            --strict-text-bounds") == 2
+
 suite "the appended block draws the readouts the design names":
   test "ribbon, pips, inset, clock, plate, feed and endcard are all there":
     let bannerAt = page.find(BannerMarker)

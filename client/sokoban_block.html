@@ -126,6 +126,32 @@
   white-space: nowrap;
 }
 
+/* ---- the `say` feed row: a RESERVED BAND, sized from the server's cap --- */
+/* The one string on this page whose length the SERVER caps is the cog's
+   `say` (MaxSayRunes = 140), and it is the only chrome that exists to show
+   what the model said. The inherited feed row is `white-space: nowrap` and
+   sized to content, which is right for a pre-bounded 10-character name and
+   wrong for a sentence: right-anchored inside #killfeed, 140 runes grow
+   LEFTWARD past the stage and off the frame at 360 px, where the whole
+   composition is only ~270 px wide (the cogchemists 2026-08-24 scar: text
+   drawn where there is no room is invisible to the load signal, to the soak
+   and to a screenshot). So the say row wraps inside the feed column that
+   #killfeed already reserves, and never grows past it. The band is reserved
+   whether or not anything is speaking, because #killfeed keeps its four-row
+   min-height either way, so the scene does not jump when a remark lands.
+   tools/ci/renderer_fixture.html drives a full-cap 140-rune say through the
+   real page at 360/640/1280 px and fails if the rendered row is shortened or
+   leaves the frame. */
+#killfeed .feed-row.say,
+#killfeed .feed-row.say .who {
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+#killfeed .feed-row.say {
+  max-width: 100%;
+  text-align: left;
+}
+
 /* ---- the dead-square inset (the repurposed #fpv panel) ---------------- */
 #fpv.sk-on { display: block; aspect-ratio: 1 / 1; }
 #fpv-canvas { width: 100%; height: 100%; display: block; }
