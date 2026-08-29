@@ -90,7 +90,7 @@ proc dataPath(name: string): string =
   if fileExists(name): name
   else: "/" & name
 
-proc loadArt() =
+proc loadArt*() =
   if artLoaded:
     return
   artLoaded = true
@@ -129,7 +129,7 @@ proc shade(image: Image, x, y: int, r, g, b, a: int) {.inline.} =
     mix(r, int(existing.r)), mix(g, int(existing.g)), mix(b, int(existing.b)),
     255'u8)
 
-proc bakeBed(sim: SimServer): Image =
+proc bakeBed*(sim: SimServer): Image =
   ## One pixie bake per level: the tiled and darkened floor, the baked cell
   ## gridlines, the bevelled masonry walls, the recessed amber marked squares
   ## and the dead-square hatch.
@@ -144,28 +144,45 @@ proc bakeBed(sim: SimServer): Image =
       let c = tile[x mod tile.width, y mod tile.height].rgba()
       result[x, y] = rgba(
         uint8(int(c.r) * 7 div 10), uint8(int(c.g) * 7 div 10),
-        uint8(int(c.b) * 7 div 10), 255'u8)
+        uint8(int(c.b) * 13 div 20), 255'u8)
   # Cell gridlines, in the palette's paper at a whisper.
   for i in 0 .. GridSize:
     let p = min(i * CellPixels, BoardPixels - 1)
     for q in 0 ..< BoardPixels:
-      result.shade(p, q, 242, 232, 216, 26)
-      result.shade(q, p, 242, 232, 216, 26)
+      result.shade(p, q, 242, 232, 216, 38)
+      result.shade(q, p, 242, 232, 216, 38)
   # Walls: cut from the starter's masonry, with a baked bevel so a wall run
-  # reads as stone rather than a black bar.
+  # reads as stone rather than a black bar. The crop offsets pick the LIT part
+  # of each source (both jpgs are mostly black elsewhere, and a black wall on a
+  # dark floor reads as a hole rather than as stone).
+  const
+    WallCropHX = 1056
+    WallCropHY = 240
+    WallCropVX = 192
+    WallCropVY = 624
   for cell in 0 ..< GridCells:
     if not sim.state.board.wall[cell]:
       continue
     let
       ox = cellX(cell) * CellPixels
       oy = cellY(cell) * CellPixels
-      source = if cellY(cell) == 0 or cellY(cell) == GridSize - 1: wallTileH
-               else: wallTileV
+      horizontal = cellY(cell) == 0 or cellY(cell) == GridSize - 1
+      source = if horizontal: wallTileH else: wallTileV
+      cropX = if horizontal: WallCropHX else: WallCropVX
+      cropY = if horizontal: WallCropHY else: WallCropVY
     for y in 0 ..< CellPixels:
       for x in 0 ..< CellPixels:
-        let c = source[(ox + x) mod source.width,
-                       (oy + y) mod source.height].rgba()
-        result[ox + x, oy + y] = rgba(c.r, c.g, c.b, 255'u8)
+        # Tile a 240 px window INSIDE the lit crop: sampling the whole sheet
+        # wraps back into its black regions and punches holes in a wall run.
+        let c = source[(cropX + (ox + x) mod 240) mod source.width,
+                       (cropY + (oy + y) mod 240) mod source.height].rgba()
+        # Lift the masonry clear of the floor: the wall must be the BRIGHT half
+        # of the read at a 12 px cell. The texture rides over a warm stone base
+        # so a dark patch of the source still reads as stone, never as a hole.
+        result[ox + x, oy + y] = rgba(
+          uint8(min(255, (int(c.r) * 7 + 96 * 3) div 10 + 18)),
+          uint8(min(255, (int(c.g) * 7 + 78 * 3) div 10 + 14)),
+          uint8(min(255, (int(c.b) * 7 + 58 * 3) div 10 + 10)), 255'u8)
     for k in 0 ..< 3:
       for x in 0 ..< CellPixels:
         result.shade(ox + x, oy + k, 255, 255, 255, 46)
