@@ -190,7 +190,15 @@ proc writePlan*(writer: ReplayWriter, tick: int, plan: PlanRecord) =
     writer.body.addU8(action.x)
     writer.body.addU8(action.y)
   writer.body.addText(plan.say)
-  writer.body.addText(plan.notes)
+  ## THE SEAT'S `notes` ARE NOT RECORDED. They are the policy's private
+  ## scratchpad — "echoed to this seat only next turn", never to the feed and
+  ## never to another reader — and the replay is a spectator artefact anyone
+  ## with the URL can decode. Nothing at playback needs them either: the sim
+  ## reads `notes` only through `endTurn`, which the replay runtime never
+  ## calls, so they are load-bearing for exactly nothing. The FIELD stays in
+  ## the format (an empty length-prefixed string) so the byte layout, the
+  ## reader and `GameVersion` are unchanged.
+  writer.body.addText("")
 
 proc writeChat*(writer: ReplayWriter, tick: int, record: string) =
   writer.body.addU8(ord(rkChat))

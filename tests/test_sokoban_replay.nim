@@ -103,6 +103,32 @@ suite "replay is self-sufficient":
     let source = readFile("src/sokoban/replay_runtime.nim")
     check "generateLevel" notin source
 
+suite "the seat's private scratchpad stays out of the replay":
+  test "notes are never written into the bytes, and the format is unchanged":
+    # `notes` is the policy's private scratchpad, echoed back to this seat and
+    # to nobody else; a replay is a spectator artefact. The plan record keeps
+    # the field (so the layout and GameVersion do not move) and writes it
+    # empty.
+    let cfg = defaultConfig()
+    let writer = newReplayWriter(configJson(cfg))
+    const Secret = "PRIVATE-SCRATCHPAD-order 1 3 2 0, never push box0 down"
+    writer.writePlan(0, PlanRecord(
+      turn: 1, level: 0, source: dsLlm,
+      actions: @[Action(kind: akWait, times: 1)],
+      say: "thinking", notes: Secret))
+    let bytes = writer.bytes()
+    check "thinking" in bytes          # the spectator line IS recorded
+    check Secret notin bytes           # the private one is not
+    let data = parseReplayBytes(bytes)
+    var plans = 0
+    for record in data.records:
+      if record.kind == rkPlan:
+        inc plans
+        check record.plan.say == "thinking"
+        check record.plan.notes == ""
+        check record.plan.actions.len == 1
+    check plans == 1
+
 suite "the parser rejects a corrupt replay rather than trusting it":
   test "every byte-to-enum read is range-checked, like the record kind":
     # `T(cursor.readU8())` on a 0..255 byte is a range error in a debug build
