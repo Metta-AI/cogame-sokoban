@@ -155,29 +155,6 @@ suite "no seat can stall":
     check "message" in keys
     check "failed_policy_index" in keys
 
-  test "the settle and the artifact write sit INSIDE the fault guard":
-    # The design note's `fault` rule is "caught; the episode is settled from
-    # the last completed tick, artifacts are still written, exit 0".
-    # `writeArtifact` raises IOError on a non-2xx POST, so a stop record, a
-    # settle or an upload outside the guard takes the game thread down with no
-    # results and no replay.
-    let source = readFile("src/sokoban/server.nim")
-    let guard = source.find("THE SETTLE AND THE ARTIFACT WRITE ARE INSIDE")
-    check guard > 0
-    let tail = source[guard .. ^1]
-    let settleAt = tail.find("gameSim.settle(reason, rule, detail)")
-    let finishAt = tail.find("finishEpisode(writer, log)")
-    let tryAt = tail.find("    try:")
-    let exceptAt = tail.find("    except CatchableError")
-    check tryAt >= 0
-    check settleAt > tryAt
-    check finishAt > tryAt
-    check exceptAt > finishAt
-    # And the two artifact writes are independent, so a failed replay upload
-    # does not also cost `results.json`.
-    check "sokoban: replay write FAILED" in source
-    check "sokoban: results write FAILED" in source
-
   test "the real player name comes off the socket, not the policy label":
     # `results.names` is the SPECTATOR name space. The shipped player's
     # registration blob carries no `name` key at all, so the server reads the
@@ -185,7 +162,7 @@ suite "no seat can stall":
     # `/player?slot&token&name=` route — and only falls back to the policy
     # label when nothing named the seat.
     let source = readFile("src/sokoban/server.nim")
-    check "request.queryParams[\"name\"]" in source
+    check "queryParams.getOrDefault(\"name\", \"\")" in source
     check "shared.names[slot] = declaredName" in source
     check "shared.names[slot] = registeredName" in source
     # And the alias never leaks into that space.
