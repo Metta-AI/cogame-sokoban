@@ -459,6 +459,51 @@ suite "end conditions":
     check unreached > 0
     check episode.sim.episodeScore() >= 0
 
+  test "a wall-clock stop never zeroes the level that was in play":
+    # The level under the cog when the clock stops is NOT an unstarted level:
+    # zeroing it would discard real, earned progress (10 000 points a crate)
+    # and under-report `finalTick`. Deterministic fixture: one turn, one crate
+    # parked on a marked square, then a forced deadline stop.
+    let cfg = defaultConfig()
+    let sim = newSimServer(cfg)
+    sim.phase = phPlaying
+    sim.startLevel(levelOf(OpenRoom))
+    # Crates sorted by (y, x): 0 (3,2), 1 (4,5), 2 (3,7), 3 (7,7). Crate 2
+    # pushed right lands on the marked square at (4,7).
+    let plan = Directive(actions: @[
+      Action(kind: akPush, box: 2, dir: dirRight, times: 1)])
+    sim.beginTurn(plan)
+    while not sim.turnComplete():
+      sim.stepTick()
+    sim.endTurn("")
+    check sim.levelActive
+    check sim.levelBoxesPlaced == 1
+    let
+      moves = sim.levelMove
+      turns = sim.levelTurn
+      pushes = sim.levelPushes
+      placed = sim.levelBoxesPlaced
+    check moves > 0
+    sim.settle(endDeadline, erWallClock, "wall clock budget reached")
+    check sim.reason == endDeadline
+    check sim.endRule == erWallClock
+    let record = sim.levels[0]
+    check record.outcome != loUnreached
+    check record.moves == moves
+    check record.turns == turns
+    check record.pushes == pushes
+    check record.boxesPlaced == placed
+    check sim.boxCredit() == placed
+    check sim.finalTick() == moves
+    check sim.episodeScore() == 10_000 * placed
+    # Every level that never started still carries zeroes and `unreached`.
+    for i in 1 ..< sim.levels.len:
+      check sim.levels[i].outcome == loUnreached
+      check sim.levels[i].moves == 0
+      check sim.levels[i].turns == 0
+      check sim.levels[i].pushes == 0
+      check sim.levels[i].boxesPlaced == 0
+
   test "results.reason is the closed three-value enum":
     var seen: seq[string] = @[]
     for reason in EndReason:
