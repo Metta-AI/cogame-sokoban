@@ -40,3 +40,27 @@ loss from 1.7541 to 1.7477. The 10 games solved 1–4 levels each.
 The hard ladder exported 277 train and 83 validation examples from 10 games.
 All 360 fit the same model; one CPU update reduced validation loss from
 1.7590 to 1.7526.
+
+# Numeric reinforcement learning
+
+Compile the persistent bridge and pass the binary, manifest, and variant to
+Metta's `recipes.external.coworld.train` (native PufferLib) or
+`recipes.external.coworld_metta_rl.train` (Metta RL):
+
+```sh
+nimby sync nimby.lock
+nim c -d:release --path:src -o:/tmp/sokoban-train-bridge tools/train_bridge.nim
+python tools/test_train_bridge.py /tmp/sokoban-train-bridge
+```
+
+Both certified ladders expose 274 numeric observation values from the hosted
+player view: current board, dead squares, legal pushes, level progress, and
+prior outcomes. Eight factorized action heads each choose stop, wait, or one
+box-and-direction push. The native parser accepts every selected plan before
+the simulator advances. The published pusher search policy supplies teacher
+plans. Spectator text and private notes remain in the post-training path.
+
+Sokoban has one seat, so the terminal result supplies its own utility. It maps
+the native score to [-1, 1] using the maximum possible ladder score as the
+denominator. Metta's single-seat utility support is required for numeric
+training; a rank comparison has no opponent here.
