@@ -61,6 +61,6 @@ the simulator advances. The published pusher search policy supplies teacher
 plans. Spectator text and private notes remain in the post-training path.
 
 Sokoban has one seat, so the terminal result supplies its own utility. It maps
-the native score to [-1, 1] using the maximum possible ladder score as the
-denominator. Metta's single-seat utility support is required for numeric
+the native score to [-1, 1] using a fixed upper bound on the ladder score as
+the denominator. Metta's single-seat utility support is required for numeric
 training; a rank comparison has no opponent here.
