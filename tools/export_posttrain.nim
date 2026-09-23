@@ -22,17 +22,20 @@ when isMainModule:
     quit("output already exists: " & output, 1)
   createDir(output)
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
+  let manifest = parseFile("coworld_manifest_template.json")
+  var variantConfig: JsonNode
+  for entry in manifest["variants"]:
+    if entry["id"].getStr() == variant:
+      variantConfig = entry["game_config"]
+  doAssert not variantConfig.isNil
   var
     trainRows: seq[string]
     validationRows: seq[string]
     runs = newJArray()
   for seed in firstSeed ..< firstSeed + episodes:
-    var config = defaultConfig()
+    var config = configFromJson(variantConfig)
     config.seed = int64(seed)
-    if variant == "hard":
-      config.tierLadder = @[tierMedium, tierMedium, tierHard, tierHard,
-        tierHard, tierHard]
-      config.parWeight = 6
+    config.validate()
     let sim = newSimServer(config)
     sim.phase = phPlaying
     var rows: seq[string]

@@ -34,9 +34,9 @@ model found a plan, that a rejected reply was accepted, or that a higher
 league score will follow. The exported prompts contain only the observation
 the search policy received; episode seeds and later levels stay hidden.
 
-A local 10-game tier-ladder proof exported 274 train and 60 validation examples. All 334
+A local 10-game tier-ladder proof exported 274 train and 70 validation examples. All 344
 fit a 2048-token smoke model; one CPU optimizer update reduced validation
-loss from 1.7506 to 1.7441. The 10 games solved 1–4 levels each.
-The hard ladder exported 277 train and 80 validation examples from 10 games.
-All 357 fit the same model; one CPU update reduced validation loss from
-1.7513 to 1.7449.
+loss from 1.7541 to 1.7477. The 10 games solved 1–4 levels each.
+The hard ladder exported 277 train and 83 validation examples from 10 games.
+All 360 fit the same model; one CPU update reduced validation loss from
+1.7590 to 1.7526.
