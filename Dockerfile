@@ -1,5 +1,5 @@
 # Build Docker. ONE image, TWO entrypoints: /bin/sokoban (rules, validation,
-# results and replay) and /bin/sokoban-player (scripted, prompt, or Jev policy).
+# results and replay) and /bin/sokoban-player (scripted or prompt policy).
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update && \
