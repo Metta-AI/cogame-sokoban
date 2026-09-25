@@ -2,8 +2,8 @@
 ## the certification seed is interesting, no seat can stall, and the guards
 ## settle early.
 
-import std/[json, os, osproc, strutils, unittest]
-import sokoban/[sim, decide]
+import std/[json, strutils, unittest]
+import sokoban/sim
 import helpers
 
 const ManifestPath = "coworld_manifest_template.json"
@@ -200,58 +200,3 @@ suite "no seat can stall":
     let source = readFile("src/sokoban/server.nim")
     check "connected but never sent a " in source
     check "refusing to treat it as a policy" in source
-
-suite "budget guard and rate guard settle early":
-  test "a forced budget guard still ends the episode complete":
-    var cfg = defaultConfig()
-    cfg.seed = 11
-    let sim = newSimServer(cfg)
-    var engine = initDecisionEngine(sim)
-    engine.seats[0].isLlm = true
-    sim.phase = phPlaying
-    sim.startLevel(levelsFor(cfg.seed, cfg)[0])
-    # elapsed is already past the point where two more turns would fit.
-    let outcome = engine.turn(sim, 1, cfg.wallClockBudgetSeconds - 5)
-    check engine.llmOff
-    var sawGuard = false
-    for record in outcome.records:
-      if parseJson(record){"k"}.getStr() == "budget_guard":
-        sawGuard = true
-        check parseJson(record){"turn"}.getInt() == 1
-    check sawGuard
-    check outcome.directive.source == dsFallback
-
-  test "the guard reserves the rate floor as well as the decision budget":
-    # A turn costs at most `turnSpacingMs` (the rate floor, paid when the
-    # previous turn was fast) plus `turnBudgetMs` (the attempt and its retry),
-    # so two more turns are 2 x (2.6 + 9) = 23.2 s, not 18 s. At 670 s elapsed
-    # the old reserve still thought two turns fit inside the 690 s stop.
-    var cfg = defaultConfig()
-    cfg.seed = 12
-    let sim = newSimServer(cfg)
-    var engine = initDecisionEngine(sim)
-    engine.seats[0].isLlm = true
-    sim.phase = phPlaying
-    sim.startLevel(levelsFor(cfg.seed, cfg)[0])
-    check cfg.wallClockBudgetSeconds == 690
-    check 670 + 2 * ((cfg.turnBudgetMs + 999) div 1000) <=
-      cfg.wallClockBudgetSeconds          # the decision budget alone: fits
-    discard engine.turn(sim, 1, 670)
-    check engine.llmOff                   # with the rate floor: it does not
-
-  test "with no credentials every turn falls back instantly and is recorded":
-    var cfg = defaultConfig()
-    cfg.seed = 12
-    let sim = newSimServer(cfg)
-    var engine = initDecisionEngine(sim)
-    engine.seats[0].isLlm = true
-    sim.phase = phPlaying
-    sim.startLevel(levelsFor(cfg.seed, cfg)[0])
-    let outcome = engine.turn(sim, 1, 0)
-    check outcome.directive.source == dsFallback
-    var causes: seq[string] = @[]
-    for record in outcome.records:
-      let node = parseJson(record)
-      if node{"k"}.getStr() == "fallback":
-        causes.add(node{"cause"}.getStr())
-    check "no_credentials" in causes

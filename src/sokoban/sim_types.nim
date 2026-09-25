@@ -21,6 +21,7 @@ const
     ## changelog line above.
 
   ProtocolName* = "sokoban/v1"
+  PlayerProtocolName* = "sokoban-player/v2"
   GameName* = "sokoban"
 
   TargetFps* = 24
@@ -140,17 +141,12 @@ type
     genNodeCap*: int
     genAttemptCap*: int
     baselineNodeCap*: int
-    attempt1Ms*: int
-    retryMs*: int
     turnBudgetMs*: int
-    turnSpacingMs*: int
     wallClockBudgetSeconds*: int
     lobbyJoinTimeoutTicks*: int
     gameOverTicks*: int
     fastMode*: bool
     showPlayerLabels*: bool
-    model*: string
-    maxOutputTokens*: int
     variant*: string
 
 const
@@ -238,16 +234,11 @@ proc defaultConfig*(): GameConfig =
     genNodeCap: 200_000,
     genAttemptCap: 8,
     baselineNodeCap: 8,
-    attempt1Ms: 6000,
-    retryMs: 3000,
     turnBudgetMs: 9000,
-    turnSpacingMs: 2600,
     wallClockBudgetSeconds: 690,
     lobbyJoinTimeoutTicks: 2400,
     gameOverTicks: 96,
     fastMode: true,
     showPlayerLabels: false,
-    model: "",
-    maxOutputTokens: 900,
     variant: "ladder"
   )

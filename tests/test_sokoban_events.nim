@@ -1,6 +1,6 @@
 ## The event vocabulary, the label manifest and the swept baseline tunables.
 
-import std/[algorithm, json, os, strutils, unittest]
+import std/[algorithm, json, strutils, unittest]
 import sokoban/[sim, events, labels, broadcast]
 import helpers
 
@@ -134,32 +134,6 @@ suite "the broadcast fallback event carries the real cause":
       if event{"k"}.getStr() == "fallback":
         second = event{"cause"}.getStr()
     check second == "fallback"
-
-suite "the fallback cause set is closed":
-  test "every cause decide.nim can write is one of the seven declared":
-    # `fallback.cause` is a CLOSED set in the design note; a cause outside it
-    # is a record a phase-60 reader cannot classify.
-    const Declared = ["timeout", "parse_error", "transport_error",
-                      "no_credentials", "rate_guard", "budget_guard",
-                      "disconnected"]
-    let source = readFile("src/sokoban/decide.nim")
-    var found: seq[string] = @[]
-    for marker in ["lastCause = \"", "fallbackPlan(\n      \""]:
-      var index = 0
-      while true:
-        index = source.find(marker, index)
-        if index < 0:
-          break
-        index += marker.len
-        var cause = ""
-        while index < source.len and source[index] != '"':
-          cause.add(source[index])
-          inc index
-        if cause.len > 0 and cause notin found:
-          found.add(cause)
-    check found.len >= 4
-    for cause in found:
-      check cause in Declared
 
 suite "label manifest":
   test "the drawn board vocabulary equals tests/label_manifest.txt":

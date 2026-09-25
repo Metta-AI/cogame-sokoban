@@ -2,7 +2,7 @@
 ## nim c -d:release --path:src -o:sokoban-train-bridge tools/train_bridge.nim
 
 import std/[json, os]
-import sokoban/[sim, llm]
+import sokoban/[sim, player_llm]
 
 const OperatorPrompt = "Plan crate pushes carefully. Check for dead squares before committing."
 

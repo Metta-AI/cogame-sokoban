@@ -419,7 +419,7 @@ proc endTurn*(sim: SimServer, notes: string) =
   ## Records what the seat is told about its own last turn. `dropped` is the
   ## REAL count — the entries that failed validation plus the ones past
   ## `maxActionsPerTurn` — and it is the same number the replay's `directive`
-  ## record carries (`decide.nim`'s `directiveRecord`). Both champion prompts
+  ## record carries (`records.nim`'s `directiveRecord`). Both champion prompts
   ## tell the seat to read `last_turn`, so a hard-coded zero would silently
   ## disable the self-correction loop for every malformed entry.
   sim.lastReport = TurnReport(
@@ -660,9 +660,8 @@ proc searchParams*(sim: SimServer): SearchParams =
   result.nodeCap = max(1, sim.config.baselineNodeCap)
 
 proc scriptedDirective*(sim: SimServer, kind: Baseline): Directive =
-  ## The scripted plan for the CURRENT state. `decide.nim`'s fallback path calls
-  ## THIS proc with `blPusher`, which is what makes the fallback and the
-  ## `pusher` filler the same code.
+  ## The scripted plan for the CURRENT state. The game uses pusher only as a
+  ## fallback when a player action is absent or invalid.
   scriptedPlan(kind, sim.state, sim.level.dead, sim.searchParams(),
                sim.config.turnMoves)
 

@@ -2,10 +2,8 @@
 ## out.
 ##
 ## The starter's validators are kept, and §Decisions' numbers satisfy them:
-## `attempt1Ms` and `retryMs` must be WHOLE SECONDS (curl's `CURLOPT_TIMEOUT`
-## granularity is whole seconds, so a 4500 ms deadline really runs with 4 s and
-## is not the deadline it claims to be), `attempt1Ms + retryMs <= turnBudgetMs`,
-## and `wallClockBudgetSeconds` must be positive.
+## The game bounds each player decision with `turnBudgetMs` and each episode
+## with `wallClockBudgetSeconds`.
 
 import std/[json, strutils]
 import sim_types
@@ -88,10 +86,7 @@ proc update*(config: var GameConfig, payload: JsonNode) =
   config.genAttemptCap = payload.getInt("genAttemptCap", config.genAttemptCap)
   config.baselineNodeCap = payload.getInt(
     "baselineNodeCap", config.baselineNodeCap)
-  config.attempt1Ms = payload.getInt("attempt1Ms", config.attempt1Ms)
-  config.retryMs = payload.getInt("retryMs", config.retryMs)
   config.turnBudgetMs = payload.getInt("turnBudgetMs", config.turnBudgetMs)
-  config.turnSpacingMs = payload.getInt("turnSpacingMs", config.turnSpacingMs)
   config.wallClockBudgetSeconds = payload.getInt(
     "wallClockBudgetSeconds", config.wallClockBudgetSeconds)
   config.lobbyJoinTimeoutTicks = payload.getInt(
@@ -100,11 +95,6 @@ proc update*(config: var GameConfig, payload: JsonNode) =
   config.fastMode = payload.getBool("fastMode", config.fastMode)
   config.showPlayerLabels = payload.getBool(
     "showPlayerLabels", config.showPlayerLabels)
-  config.maxOutputTokens = payload.getInt(
-    "maxOutputTokens", config.maxOutputTokens)
-  let model = payload{"model"}
-  if not model.isNil and model.kind == JString:
-    config.model = model.getStr()
   let variant = payload{"variant"}
   if not variant.isNil and variant.kind == JString:
     config.variant = variant.getStr()
@@ -133,14 +123,8 @@ proc validate*(config: GameConfig) =
   if config.maxTicks != config.maxTurns * config.turnMoves:
     raise newException(SokobanError,
       "maxTicks must equal maxTurns * turnMoves")
-  if config.attempt1Ms mod 1000 != 0 or config.retryMs mod 1000 != 0:
-    raise newException(SokobanError,
-      "attempt1Ms and retryMs must be whole seconds: curl's CURLOPT_TIMEOUT " &
-      "granularity is whole seconds, so a sub-second remainder is silently " &
-      "floored and the deadline is not the one configured")
-  if config.attempt1Ms + config.retryMs > config.turnBudgetMs:
-    raise newException(SokobanError,
-      "attempt1Ms + retryMs must fit inside turnBudgetMs")
+  if config.turnBudgetMs <= 0:
+    raise newException(SokobanError, "turnBudgetMs must be positive")
   if config.wallClockBudgetSeconds <= 0:
     raise newException(SokobanError,
       "wallClockBudgetSeconds must be positive")

@@ -2,7 +2,7 @@
 ## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT EPISODES [FIRST_SEED] [ladder|hard]
 
 import std/[json, os, osproc, strutils]
-import sokoban/[sim, llm]
+import sokoban/[sim, player_llm]
 
 const OperatorPrompt = "Plan crate pushes carefully. Check for dead squares before committing."
 
