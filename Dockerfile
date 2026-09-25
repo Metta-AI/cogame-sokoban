@@ -1,9 +1,5 @@
-# Build Docker. ONE image, TWO entrypoints: /bin/sokoban (the game server,
-# which makes every decision including the LLM call) and /bin/sokoban-player
-# (the thin seat registrar). The whole policy set is env-switched inside this
-# same image (PLAYER_PROMPT vs PLAYER_SCRIPTED=pusher|nudger), which is what
-# keeps a champion and a scripted filler byte-identical apart from their
-# environment.
+# Build Docker. ONE image, TWO entrypoints: /bin/sokoban (rules, validation,
+# results and replay) and /bin/sokoban-player (scripted, prompt, or Jev policy).
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update && \

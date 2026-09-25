@@ -1,6 +1,4 @@
-## Claude-backed play. A policy is just a prompt: the game server composes the
-## seat's board view plus that seat's PLAYER_PROMPT and asks Claude what the cog
-## does for the next twenty moves.
+## Claude transport for prompt policies in the player container.
 ##
 ## Forked from `coworld-ctf`'s `src/ctf/llm.nim` behaviour for behaviour — the
 ## credential ladder, the Bedrock model rotation, the fence-tolerant JSON
@@ -21,8 +19,9 @@
 ## certification finish in seconds.
 
 import std/[json, os, strutils]
+import bitworld/runtime
 import curly
-import sim_types, sim_config, directives
+import sim_types
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -87,11 +86,11 @@ proc bedrockUrl(client: LlmClient): string =
   client.bedrockEndpoint & "/model/" &
     client.bedrockModels[client.bedrockModel] & "/invoke"
 
-proc newLlmClient*(config: GameConfig): LlmClient =
+proc newLlmClient*(): LlmClient =
   result = LlmClient(
-    model: (if config.model.len > 0: config.model
-            else: "claude-haiku-4-5-20251001"),
-    maxOutputTokens: max(1, config.maxOutputTokens)
+    model: getEnv("PLAYER_MODEL", "claude-haiku-4-5-20251001"),
+    maxOutputTokens: max(1,
+      getEnv("PLAYER_MAX_OUTPUT_TOKENS", "900").parseInt())
   )
   let
     bedrockEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip()
@@ -117,8 +116,8 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   else:
     result.transport = ltNone
     result.disabled = true
-    ## The exact phrase phase 60 greps the GAME log for, alongside "falling
-    ## back" in decide.nim: "LLM provider is unavailable".
+    ## The player logs missing credentials and falls back through its own
+    ## ordinary action reply.
     echo "sokoban llm: no credentials — the LLM provider is unavailable; ",
       "every turn is falling back to the scripted layer"
 

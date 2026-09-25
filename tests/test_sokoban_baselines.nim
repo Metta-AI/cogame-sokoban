@@ -3,6 +3,7 @@
 
 import std/[json, strutils, unicode, unittest]
 import sokoban/sim
+import sokoban/policy_view
 import helpers
 
 proc statesFor(count: int): seq[Level] =
@@ -115,6 +116,22 @@ suite "fallback is the pusher proc":
                                    sim.searchParams(), cfg.turnMoves)
       check $viaEngine.actionsJson() == $viaBaseline.actionsJson()
 
+suite "scripted player observation":
+  test "both baselines preserve turn-start box IDs from the public view":
+    let cfg = defaultConfig()
+    for level in statesFor(SampleStates):
+      let sim = newSimServer(cfg)
+      sim.phase = phPlaying
+      sim.startLevel(level)
+      for reordered in [false, true]:
+        if reordered:
+          swap(sim.state.boxes[0], sim.state.boxes[1])
+        let view = sim.observationJson(0)
+        for kind in [blPusher, blNudger]:
+          let expected = sim.scriptedDirective(kind)
+          let actual = scriptedPlanForView(view, kind)
+          check $actual.actionsJson() == $expected.actionsJson()
+
 suite "reply validation":
   test "the schema is accepted":
     let payload = parseJson("""{"actions":[
@@ -222,7 +239,7 @@ suite "reply validation":
     check directive.say.runeLen == MaxSayRunes
     check directive.say.validateUtf8() == -1
     # The provider path uses it — both the envelope read and the text cap.
-    let source = readFile("src/sokoban/llm.nim")
+    let source = readFile("src/sokoban/player_llm.nim")
     check source.count("truncateUtf8Bytes") == 2
     check "MaxReplyBytes]" notin source
 

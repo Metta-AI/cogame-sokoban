@@ -69,7 +69,7 @@ when isMainModule:
       " stepBudget=", config.stepBudget,
       " maxTicks=", config.maxTicks,
       " wallClock=", config.wallClockBudgetSeconds, "s",
-      " model=", config.model
+      " turnBudgetMs=", config.turnBudgetMs
     try:
       runGameServer(config, runtimeConfig)
     except CatchableError as error:

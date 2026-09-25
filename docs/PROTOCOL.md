@@ -1,6 +1,7 @@
 # Protocol
 
-Protocol name: **`sokoban/v1`**.
+Replay protocol: **`sokoban/v1`**. Player socket protocol:
+**`sokoban-player/v2`**.
 
 ## The Coworld game contract
 
@@ -30,29 +31,41 @@ binary registration frames.
 
 ## The player protocol
 
-The seat sends ONE registration blob as a Sprite v1 chat frame (`0x81`), and
-re-sends it for the first ~10 s of received frames (a first send can race the
-server's slot bookkeeping):
+The seat sends a registration blob as a Sprite v1 chat frame (`0x81`), and
+re-sends it for the first ~10 s of received frames:
 
 ```json
-{"policy": "<label>", "prompt": "<PLAYER_PROMPT or empty>",
+{"policy": "<label>", "kind": "llm" | "scripted",
  "scripted": "pusher" | "nudger" | null}
 ```
 
-`prompt` is rune-truncated at 4000 and `policy` at 64. The server consumes it as
-**registration** — never as a line, never into the replay chat stream — and
-writes a **redacted** `register` record instead (policy label and kind, never
-the prompt). Any other chat text from the seat is dropped: the cog speaks
-through `say`.
+`policy` is rune-truncated at 64. The server records the label and kind, while
+the player's prompt and model credential remain in the player container.
+The cog speaks through `say` in an action reply.
 
-The server sends `welcome`, then one informational `turn` frame per command
-turn, then `{"done": true, "result": {…}}`. The seat is not required to answer:
-**every decision is made in the game server**, because that is where the
-`anthropic_api_key` coworld secret is injected.
+The server sends `welcome`, then an `observation` request for each command turn:
 
-A seat that never connects, disconnects mid-episode, or fails every decision is
-driven by `pusher` and the ladder runs to its natural end with
-`deadSeats[0] = true`. A no-show is reported once to
+```json
+{"type":"observation","id":23,"observation":{"board":["…"]},
+ "max_actions":8,"turn_budget_ms":9000}
+```
+
+The player responds with the same turn ID and an ordinary action object:
+
+```json
+{"type":"action","id":23,"source":"llm",
+ "action":{"actions":[{"do":"push","box":1,"dir":"R"}],
+           "say":"right crate first","notes":"keep box 0 parked"}}
+```
+
+`source` is `llm`, `scripted`, or `fallback` for replay attribution. Fallback
+replies include a closed `cause` such as `no_credentials`. The game validates
+the action and uses its pusher fallback when a reply is invalid, late, or
+missing. The game then sends `{"done": true, "result": {…}}` at episode end.
+
+A seat that never connects or fails a decision is driven by `pusher`; the
+ladder still reaches its natural end. A no-show sets `deadSeats[0] = true` and
+is reported once to
 `COGAME_PLAYER_FAILURE_URI` with the platform's **closed** payload — exactly
 `{"message", "failed_policy_index"}`.
 
@@ -67,7 +80,7 @@ server is contacted except S3 for the file.
 | config JSON | `seed`, `variant`, `num_agents`, every rule constant, the tier ladder, `players[].name`, `slots[]`, `fastMode` |
 | levels | per level: ten XSB rows, `tier`, `optPushes`, the dead-square list, `tierRelaxed` |
 | plans | per turn: the accepted action list — this game's entire input log |
-| chats | `register` / `directive` / `fallback` / `budget_guard` / `stop` / `result` |
+| chats | `register` / `directive` / `fallback` / `stop` / `result` |
 | hashes | one `gameHash` per tick — the integrity chain the viewer checks |
 
 **The level grids are recorded, not regenerated**: the generator is a bounded

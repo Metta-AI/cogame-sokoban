@@ -21,9 +21,10 @@ toward the goal, and the difference between a solved level and a dead one is
 usually a single push made in the wrong order. That is exactly what this coworld
 exists to measure.
 
-**A policy is just a prompt.** The game server composes the seat's board view
-plus that seat's `PLAYER_PROMPT` and asks Claude what the cog does for the next
-twenty moves.
+The game sends each player the complete seat observation and accepts a plan in
+the same action schema from scripted, prompt, Jev, or custom policies. Model
+calls and prompts run in the player. The game validates plans, applies the
+rules, and records results and replay.
 
 - [docs/RULES.md](docs/RULES.md) — the board, the primitives, deadlock
   detection, scoring, the end conditions.
@@ -52,6 +53,12 @@ PLAYER_SCRIPTED=pusher    # a bounded best-first search over push space
 PLAYER_SCRIPTED=nudger    # one ply, no lookahead: the floor
 ```
 
+Set `PLAYER_JEV=1` to rank ordinary turn plans with Jev System One. Hosted
+prompt players need `--use-bedrock` or a policy-scoped
+`--secret-env ANTHROPIC_API_KEY=...`; Jev players need a TypeSafe credential or
+sidecar. Existing hosted prompt policy versions must be reuploaded with player
+credentials before a game version using this protocol is released.
+
 `tools/ci/policies.json` is the shipped set: two `PLAYER_PROMPT` champions
 (`sokoban-lookahead`, `sokoban-orderfirst`) and those two baselines as league
 fillers — one image, env-switched, so a champion and a filler are byte-identical
@@ -61,9 +68,9 @@ apart from their environment.
 
 | Path | What |
 |---|---|
-| `src/sokoban/` | the sim: `grid`, `deadlock`, `levelgen`, `search`, `driver`, `baselines`, `sim`, plus the server, the decision layer and the LLM client |
+| `src/sokoban/` | the sim and server, plus player policies and model transports |
 | `src/sokoban.nim` | the game entrypoint (`/bin/sokoban`) |
-| `src/sokoban_player.nim` | the thin seat registrar (`/bin/sokoban-player`) |
+| `src/sokoban_player.nim` | the player decision loop (`/bin/sokoban-player`) |
 | `client/` | the broadcast chrome, inherited from `coworld-ctf` |
 | `replay-viewer/` | the wasm entry, the emscripten flags and the static shell |
 | `tools/` | the build hook, the baseline sweep, the forensics scripts |

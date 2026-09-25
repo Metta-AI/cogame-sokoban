@@ -97,11 +97,9 @@ suite "manifest pins":
     let limit = manifest["player"][0]["resources"]["limits"]["cpu"].getStr()
     check limit == "1" or limit == "2" or limit.endsWith("000m")
 
-  test "game.name equals the slug and the secret URI's namespace":
+  test "game.name equals the slug and model secrets stay off the game":
     check manifest["game"]["name"].getStr() == GameName
-    let uri = manifest["game"]["runnable"]["env"]["ANTHROPIC_API_KEY_URI"]
-      .getStr()
-    check uri == "secret://coworld/" & GameName & "/anthropic_api_key"
+    check not manifest["game"]["runnable"].hasKey("env")
     check "cogame-" & GameName in
       manifest["game"]["runnable"]["source_url"].getStr()
 
@@ -114,19 +112,13 @@ suite "manifest pins":
     check manifest["certification"]["game_config"][
       "wallClockBudgetSeconds"].getInt() <= 690
 
-  test "the deadline arithmetic and the ladder identities hold in every config":
+  test "the decision deadline and ladder identities hold in every config":
     var configs: seq[JsonNode] = @[]
     for variant in manifest["variants"]:
       configs.add(variant["game_config"])
     configs.add(manifest["certification"]["game_config"])
     for node in configs:
-      let
-        attempt1 = node["attempt1Ms"].getInt()
-        retry = node["retryMs"].getInt()
-        budget = node["turnBudgetMs"].getInt()
-      check attempt1 mod 1000 == 0
-      check retry mod 1000 == 0
-      check attempt1 + retry <= budget
+      check node["turnBudgetMs"].getInt() > 0
       check node["stepBudget"].getInt() ==
         node["levelTurnCap"].getInt() * node["turnMoves"].getInt()
       check node["maxTurns"].getInt() ==

@@ -18,7 +18,7 @@
 ##
 ## Endpoints:
 ##   GET /healthz                 liveness
-##   GET /client/player           the seat page (view-only; policies are prompts)
+##   GET /client/player           the seat page (view-only)
 ##   GET /client/global           the spectator page
 ##   GET /client/replay           the broadcast replay page
 ##   GET /client/<asset>          chrome_common.js, broadcast_core.js, art
@@ -34,13 +34,13 @@
 ## guard: a `kind != TextMessage` guard drops the player's BINARY registration
 ## frames (lux-ai 0.1.0, snake-royale 0.1.0).
 
-import std/[json, locks, os, sets, strutils, tables, times]
+import std/[json, locks, monotimes, os, sets, strutils, tables, times]
 import bitworld/runtime
 import bitworld/spriteprotocol
 import curly
 import mummy
 import mummy/routers
-import sim_types, sim, sim_config, broadcast, decide, events, global,
+import sim_types, sim, sim_config, broadcast, records, events, global,
   replays, replay_runtime, wire_constants
 
 const
@@ -52,7 +52,6 @@ const
 
 type
   ServerState = object
-    prompts: seq[string]
     scripted: seq[Baseline]
     isLlm: seq[bool]
     policies: seq[string]
@@ -60,6 +59,8 @@ type
     registered: seq[bool]
     everRegistered: seq[bool]
     playerSockets: Table[int, WebSocket]
+    actionTurn: int
+    actionText: string
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
     viewerStates: Table[WebSocket, GlobalViewerState]
@@ -138,8 +139,7 @@ proc liveChrome(): string =
     transportEnabled = false, mismatchTick = -1)
 
 proc pushFrames() =
-  ## Informational: the seat is not required to answer, decisions are
-  ## server-side.
+  ## These are informational frames after the action has resolved.
   let chrome = liveChrome()
   broadcastPacketLocked(chrome)
   for slot, socket in shared.playerSockets:
@@ -151,6 +151,66 @@ proc pushFrames() =
       }))
     except CatchableError:
       discard
+
+proc playerTurn(view: JsonNode, turn, budgetMs: int): tuple[directive: Directive,
+    cause: string] =
+  ## A reply is accepted only for this turn. The game validates the plan and
+  ## owns the deadline, while the player owns the decision.
+  result.directive = gameSim.scriptedDirective(blPusher)
+  result.directive.source = dsFallback
+  result.cause = "disconnected"
+  var sent = false
+  withLock stateLock:
+    shared.actionTurn = turn
+    shared.actionText = ""
+    if shared.playerSockets.hasKey(0):
+      try:
+        shared.playerSockets[0].send($(%*{
+          "type": "observation", "id": turn, "observation": view,
+          "max_actions": gameSim.config.maxActionsPerTurn,
+          "turn_budget_ms": budgetMs}))
+        sent = true
+      except CatchableError:
+        discard
+  if not sent:
+    return
+  result.cause = "timeout"
+  let started = getMonoTime()
+  while (getMonoTime() - started).inMilliseconds < budgetMs:
+    var text = ""
+    withLock stateLock:
+      text = shared.actionText
+    if text.len > 0:
+      try:
+        let payload = parseJson(text)
+        let source = payload["source"].getStr()
+        if source notin ["scripted", "llm", "fallback"]:
+          raise newException(ValueError, "unknown player action source")
+        let directive = parseDirective(payload["action"],
+          gameSim.config.maxActionsPerTurn)
+        result.directive = directive
+        result.directive.source =
+          if source == "scripted": dsScripted
+          elif source == "fallback": dsFallback
+          else: dsLlm
+        result.cause =
+          if result.directive.source == dsFallback:
+            payload{"cause"}.getStr("transport_error")
+          else: ""
+        if result.cause.len > 0 and result.cause notin [
+            "timeout", "parse_error", "transport_error", "no_credentials",
+            "rate_guard", "budget_guard", "disconnected"]:
+          result.cause = "transport_error"
+        result.directive.latencyMs =
+          (getMonoTime() - started).inMilliseconds.int
+      except CatchableError as error:
+        echo "sokoban: invalid player action on turn ", turn, ": ",
+          error.msg
+        result.cause = "parse_error"
+      return
+    sleep(10)
+  result.directive.latencyMs =
+    (getMonoTime() - started).inMilliseconds.int
 
 proc broadcastDone(results: JsonNode) =
   let payload = $(%*{"done": true, "result": results})
@@ -262,15 +322,6 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
         "player slot " & $noShow & " never registered; the seat played the " &
         "pusher baseline")
 
-    var engine = initDecisionEngine(gameSim)
-    withLock stateLock:
-      for slot in 0 ..< shared.seats:
-        engine.seats[slot].isLlm = shared.isLlm[slot]
-        engine.seats[slot].prompt = shared.prompts[slot]
-        engine.seats[slot].baseline = shared.scripted[slot]
-        engine.seats[slot].label = shared.policies[slot]
-        engine.seats[slot].registered = shared.everRegistered[slot]
-
     let writer = newReplayWriter(configJson(config))
     let log = newEventLog(true)
     for slot in 0 ..< shared.seats:
@@ -312,7 +363,15 @@ proc runGame(unused: RuntimeConfig) {.gcsafe.} =
             "optPushes": level.optPushes})
         if not gameSim.levelActive:
           break
-        let outcome = engine.turn(gameSim, gameSim.turnsPlayed + 1, elapsed)
+        let view = gameSim.observationJson(0)
+        let budgetMs = min(config.turnBudgetMs,
+          max(1, (config.wallClockBudgetSeconds - elapsed) * 1000))
+        let decision = playerTurn(view, gameSim.turnsPlayed + 1, budgetMs)
+        let outcome = (directive: decision.directive,
+                       records: (if decision.cause.len > 0:
+                         @[fallbackRecord(gameSim.turnsPlayed + 1, 1,
+                           decision.cause, "")]
+                         else: newSeq[string]()), view: view)
         var directive = outcome.directive
         for record in outcome.records:
           writer.writeChat(gameSim.tick, record)
@@ -457,8 +516,8 @@ proc playerPageHandler(request: Request) {.gcsafe.} =
     serveText(request,
       "<!doctype html><meta charset=utf-8><title>Sokoban seat</title>" &
       "<body style=\"background:#16110d;color:#f2e8d8;font:14px system-ui;" &
-      "padding:24px\"><h1>Sokoban</h1><p>A policy is just a prompt. This seat " &
-      "is driven from the game server; there is nothing to control here.</p>" &
+      "padding:24px\"><h1>Sokoban</h1><p>The player policy controls this " &
+      "seat from the turn observation and action socket.</p>" &
       "<p><a style=\"color:#e8a33d\" href=\"/client/replay\">Watch the " &
       "board</a></p>", "text/html; charset=utf-8")
 
@@ -529,7 +588,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         shared.playerSockets.len, "/", shared.seats, ")"
       try:
         websocket.send($(%*{
-          "type": "welcome", "protocol": ProtocolName, "slot": slot,
+          "type": "welcome", "protocol": PlayerProtocolName, "slot": slot,
           "alias": seatAlias(slot),
           "turn_moves": gameSim.config.turnMoves}))
       except CatchableError:
@@ -551,8 +610,7 @@ proc globalUpgradeHandler(request: Request) {.gcsafe.} =
         discard
 
 proc applyRegistration(slot: int, text: string): bool =
-  ## The seat's registration blob. Any OTHER chat text from the seat is dropped
-  ## — the cog speaks through `say`, never through the socket.
+  ## Registration carries metadata only. Actions are handled separately.
   var payload: JsonNode
   try:
     payload = parseJson(text)
@@ -560,19 +618,16 @@ proc applyRegistration(slot: int, text: string): bool =
     return false
   if payload.isNil or payload.kind != JObject:
     return false
-  if not payload.hasKey("policy") and not payload.hasKey("prompt") and
-      not payload.hasKey("scripted"):
+  if not payload.hasKey("policy"):
     return false
-  var prompt = payload{"prompt"}.getStr().truncateRunes(MaxPromptRunes)
   let scriptedNode = payload{"scripted"}
   var scriptedName = ""
   if not scriptedNode.isNil and scriptedNode.kind == JString:
     scriptedName = scriptedNode.getStr().strip()
-  var isLlm = prompt.strip().len > 0
+  var isLlm = payload{"kind"}.getStr() == "llm"
   if scriptedName.len > 0:
     isLlm = false
   withLock stateLock:
-    shared.prompts[slot] = prompt
     shared.isLlm[slot] = isLlm
     shared.scripted[slot] =
       if scriptedName.len > 0: parseBaseline(scriptedName) else: blPusher
@@ -593,8 +648,26 @@ proc applyRegistration(slot: int, text: string): bool =
       shared.names[slot] = shared.policies[slot]
     shared.registered[slot] = true
     shared.everRegistered[slot] = true
-  echo "sokoban: slot ", slot, " registered (", prompt.len, " prompt chars",
-    (if isLlm: ", llm" else: ", scripted " & scriptedName), ")"
+  echo "sokoban: slot ", slot, " registered (",
+    (if isLlm: "llm" else: "scripted " & scriptedName), ")"
+  true
+
+proc applyAction(slot: int, text: string): bool =
+  var payload: JsonNode
+  try:
+    payload = parseJson(text)
+  except CatchableError:
+    return false
+  if payload.kind != JObject or not payload.hasKey("id") or
+      payload["id"].kind != JInt:
+    return false
+  if payload{"type"}.getStr() != "action":
+    return false
+  withLock stateLock:
+    if slot == 0 and shared.everRegistered[slot] and
+        payload{"id"}.getInt() == shared.actionTurn and
+        shared.actionText.len == 0:
+      shared.actionText = text
   true
 
 proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
@@ -633,6 +706,8 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
           if applyRegistration(slot, item.text):
             handled = true
       if not handled:
+        if message.kind == TextMessage and applyAction(slot, message.data):
+          return
         discard applyRegistration(slot, message.data)
     of ErrorEvent:
       discard
@@ -680,7 +755,6 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   eventsSinkPath = requireFileUri("COGAME_EVENTS_URI")
   gameSim = newSimServer(config)
   shared.seats = config.numAgents
-  shared.prompts = newSeq[string](shared.seats)
   shared.scripted = newSeq[Baseline](shared.seats)
   shared.isLlm = newSeq[bool](shared.seats)
   shared.policies = newSeq[string](shared.seats)

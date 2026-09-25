@@ -5,9 +5,8 @@
 ## `say` OR `notes` — a baseline that narrated would make the feed lie about
 ## which seats are LLMs.
 ##
-## `pusher` is also the server-side fallback: `decide.nim` imports THIS proc
-## rather than duplicating it, so the fallback and the filler can never drift
-## (`tests/test_sokoban_baselines.nim` asserts they are the same proc).
+## `pusher` is also the game's missing-action fallback. Scripted players run
+## the same proc from the public observation.
 
 import std/strutils
 import sim_types, grid, deadlock, search, directives

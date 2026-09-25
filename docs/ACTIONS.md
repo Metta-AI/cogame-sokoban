@@ -1,9 +1,8 @@
 # Actions and the reply format
 
-A policy is just a prompt. The **game server** composes the seat's board view
-plus that seat's `PLAYER_PROMPT` and asks Claude what the cog does for the next
-twenty moves; the player container only registers. There is exactly **one**
-request per turn, plus at most **one** retry.
+The game sends each player this observation. The player returns a plan in the
+same action schema whether it uses a scripted search, a prompt model, Jev, or
+another policy. The game validates the plan and applies every move.
 
 ## What the seat gets each turn
 
@@ -73,7 +72,7 @@ the agent's own score, and its own real policy name.
 | `say` | ≤ **140** runes — drawn in the spectator feed, never fed back to the seat |
 | `notes` | ≤ **320** runes — private scratchpad, echoed to this seat only next turn |
 | whole reply | ≤ 4096 bytes read from the provider before parsing |
-| `PLAYER_PROMPT` | ≤ 4000 runes at registration |
+| `PLAYER_PROMPT` | ≤ 4000 runes in the player process; never sent to the game |
 
 **Invalid actions are dropped, never rewritten.** In a game where one wrong push
 is fatal, repairing a malformed push into a different push would let the *game*
@@ -115,3 +114,6 @@ coworld upload-policy coworld-sokoban --name my-sokoban \
 Or run one of the two shipped scripted baselines from the same image:
 `PLAYER_SCRIPTED=pusher` (a bounded best-first search over push space) or
 `PLAYER_SCRIPTED=nudger` (one-ply, no lookahead).
+
+`PLAYER_JEV=1` ranks these plans and the currently legal pushes through Jev
+System One. It returns one ordinary plan through the same player action socket.
