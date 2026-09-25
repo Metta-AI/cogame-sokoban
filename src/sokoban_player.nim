@@ -1,4 +1,4 @@
-## Sokoban player: scripted search, prompt model, or Jev from one observation.
+## Sokoban player: scripted search or prompt model from one observation.
 ## The game receives only metadata and ordinary plans; prompts and model
 ## credentials remain in this player process.
 ##
@@ -10,7 +10,7 @@ import std/[json, options, os, strutils, times]
 import bitworld/spriteprotocol
 import whisky
 import sokoban/sim_types
-import sokoban/[baselines, directives, jev_policy, model_pacing, player_llm,
+import sokoban/[baselines, directives, model_pacing, player_llm,
   policy_view, prompt_policy]
 
 const
@@ -34,25 +34,23 @@ when isMainModule:
     quit("COWORLD_PLAYER_WS_URL is not set", 1)
   let prompt = getEnv("PLAYER_PROMPT").truncateRunes(MaxPromptRunes)
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let jev = getEnv("PLAYER_JEV") == "1"
   let label = getEnv("PLAYER_POLICY_LABEL").truncateRunes(MaxPolicyLabelRunes)
   let promptClient =
-    if prompt.strip().len > 0 and scripted.len == 0 and not jev:
+    if prompt.strip().len > 0 and scripted.len == 0:
       newLlmClient()
     else:
       nil
   var pacer =
-    if jev or promptClient != nil: newModelPacer()
+    if promptClient != nil: newModelPacer()
     else: ModelPacer()
 
   let registration = $(%*{
     "policy": (if label.len > 0: label
-               elif jev: "jev"
                elif prompt.strip().len > 0: "llm"
                elif scripted.len > 0: scripted
                else: "pusher"),
     "scripted": (if scripted.len > 0: %scripted else: newJNull()),
-    "kind": (if jev or prompt.strip().len > 0: "llm" else: "scripted")
+    "kind": (if prompt.strip().len > 0: "llm" else: "scripted")
   })
 
   var socket: WebSocket = nil
@@ -77,7 +75,7 @@ when isMainModule:
 
   sendRegistration()
   echo "sokoban player: registered ",
-    (if jev: "Jev" elif scripted.len > 0: scripted
+    (if scripted.len > 0: scripted
      elif prompt.len > 0: "prompt" else: "pusher")
 
   let started = epochTime()
@@ -117,22 +115,7 @@ when isMainModule:
         var plan: JsonNode
         var source = "scripted"
         var cause = ""
-        if jev:
-          try:
-            plan = chooseJevPlan(view, pacer,
-              payload["turn_budget_ms"].getInt())
-            source = "llm"
-          except RateGuardError as error:
-            echo "sokoban Jev player: rate guard: ", error.msg
-            plan = fallbackAction(view)
-            source = "fallback"
-            cause = "rate_guard"
-          except CatchableError as error:
-            echo "sokoban Jev player: fallback to pusher: ", error.msg
-            plan = fallbackAction(view)
-            source = "fallback"
-            cause = "transport_error"
-        elif prompt.strip().len > 0 and scripted.len == 0:
+        if prompt.strip().len > 0 and scripted.len == 0:
           try:
             plan = choosePromptPlan(promptClient, pacer, view, prompt,
               payload["max_actions"].getInt(),

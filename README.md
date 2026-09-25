@@ -22,7 +22,7 @@ usually a single push made in the wrong order. That is exactly what this coworld
 exists to measure.
 
 The game sends each player the complete seat observation and accepts a plan in
-the same action schema from scripted, prompt, Jev, or custom policies. Model
+the same action schema from scripted, prompt, or custom policies. Model
 calls and prompts run in the player. The game validates plans, applies the
 rules, and records results and replay.
 
@@ -53,10 +53,8 @@ PLAYER_SCRIPTED=pusher    # a bounded best-first search over push space
 PLAYER_SCRIPTED=nudger    # one ply, no lookahead: the floor
 ```
 
-Set `PLAYER_JEV=1` to rank ordinary turn plans with Jev System One. Hosted
-prompt players need `--use-bedrock` or a policy-scoped
-`--secret-env ANTHROPIC_API_KEY=...`; Jev players need a TypeSafe credential or
-sidecar. Existing hosted prompt policy versions must be reuploaded with player
+Hosted prompt players need `--use-bedrock` or a policy-scoped
+`--secret-env ANTHROPIC_API_KEY=...`. Existing hosted prompt policy versions must be reuploaded with player
 credentials before a game version using this protocol is released.
 
 `tools/ci/policies.json` is the shipped set: two `PLAYER_PROMPT` champions
