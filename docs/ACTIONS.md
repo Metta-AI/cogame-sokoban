@@ -1,7 +1,7 @@
 # Actions and the reply format
 
 The game sends each player this observation. The player returns a plan in the
-same action schema whether it uses a scripted search, a prompt model, Jev, or
+same action schema whether it uses a scripted search, a prompt model, or
 another policy. The game validates the plan and applies every move.
 
 ## What the seat gets each turn
@@ -114,6 +114,3 @@ coworld upload-policy coworld-sokoban --name my-sokoban \
 Or run one of the two shipped scripted baselines from the same image:
 `PLAYER_SCRIPTED=pusher` (a bounded best-first search over push space) or
 `PLAYER_SCRIPTED=nudger` (one-ply, no lookahead).
-
-`PLAYER_JEV=1` ranks these plans and the currently legal pushes through Jev
-System One. It returns one ordinary plan through the same player action socket.
