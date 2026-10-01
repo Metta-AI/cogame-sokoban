@@ -19,7 +19,7 @@ proc choosePromptPlan*(
     pacer.acquire(remaining)
     remaining = budgetMs - (getMonoTime() - started).inMilliseconds.int
     let request = client.requestFor(SystemPrompt,
-      userMessage(prompt, $view))
+      userMessage(prompt, $view), -1)
     var batch: RequestBatch
     batch.post(request.url, request.headers, request.body, "0")
     let timeout = max(1, min(
