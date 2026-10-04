@@ -37,6 +37,7 @@ proc choosePromptPlan*(client: LlmClient, pacer: var ModelPacer,
       client.lastAttempt.rejectionReason = some("native_or_directive_rejected")
       client.attempts.add(client.lastAttempt)
       progress(client.lastAttempt)
-      if client.disabled or interruptionRequested() or control.nativeRequestCanceled():
+      if client.disabled or client.throttled or interruptionRequested() or
+          control.nativeRequestCanceled():
         break
   raise newException(LlmError, "no usable native directive before the turn deadline")

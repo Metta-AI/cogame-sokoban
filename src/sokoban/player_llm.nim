@@ -15,6 +15,7 @@ type
     maxOutputTokens*: int
     temperature*: float
     disabled*: bool
+    throttled*: bool
     lastAttempt*: DecisionAttempt
     attempts*: seq[DecisionAttempt]
 
@@ -119,6 +120,7 @@ proc textOf*(client: LlmClient, response: NativeHttpResponse): string =
     client.disabled = true
     raise newException(LlmError, "native inference auth failed (" & $status & ")")
   if status == 429:
+    client.throttled = true
     raise newException(LlmError, "native inference throttled (429)")
   if status < 200 or status >= 300:
     raise newException(LlmError, "native inference error " & $status)

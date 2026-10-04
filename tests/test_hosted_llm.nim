@@ -71,3 +71,23 @@ suite "sampling mode binds the original request temperature":
     check client.textOf(response) == "reply"
     check client.lastAttempt.behaviorLogprobs.isNone
     check client.lastAttempt.promptTokenIds.isNone
+
+
+suite "received throttling ends the decision retry loop":
+  test "429 preserves received bytes and marks the client throttled":
+    let client = newLlmClient()
+    client.lastAttempt = newDecisionAttempt("test-throttle", "synthetic-test", aoModel)
+    client.lastAttempt.request = parseJson(client.requestFor("rules", "view", 0).body)
+    let raw = "private throttling fixture"
+    let response = NativeHttpResponse(kind: nhComplete, httpStatus: some(429),
+      headerBytes: "HTTP/1.1 429 Too Many Requests\r\nrequest-id: fixture-throttle\r\n\r\n",
+      bodyBytes: raw, transferComplete: true, responseReaderJoined: some(true))
+    expect LlmError:
+      discard client.textOf(response)
+    check client.throttled
+    check client.lastAttempt.httpStatus == some(429)
+    check client.lastAttempt.rawResponse == %raw
+    check client.lastAttempt.responseComplete == some(true)
+    check client.lastAttempt.responseReaderJoined == some(true)
+    check client.lastAttempt.providerRequestId == some("fixture-throttle")
+    check not client.lastAttempt.accepted
