@@ -144,6 +144,22 @@ proc textOf*(client: LlmClient, response: NativeHttpResponse): string =
     if sampling.kind != JObject or sampling["prompt_token_ids"].kind != JArray or
         sampling["completion_token_ids"].kind != JArray or sampling["stop_reason"].kind != JString:
       raise newException(LlmError, "native sampling evidence violates the token schema")
+    let requestTemperature = client.lastAttempt.request["temperature"].getFloat()
+    if not sampling.hasKey("sampling") or sampling["sampling"].kind != JString:
+      raise newException(LlmError, "native sampling evidence requires its declared mode")
+    case sampling["sampling"].getStr()
+    of "full_softmax_temperature_one":
+      if requestTemperature != 1 or sampling.hasKey("temperature"):
+        raise newException(LlmError, "unit sampling differs from the original request temperature")
+    of "full_softmax":
+      if not sampling.hasKey("temperature") or sampling["temperature"].kind notin {JInt, JFloat}:
+        raise newException(LlmError, "tempered sampling requires an explicit temperature")
+      let temperature = sampling["temperature"].getFloat()
+      if classify(temperature) in {fcNan, fcInf, fcNegInf} or temperature <= 0 or
+          temperature > 2 or temperature != requestTemperature:
+        raise newException(LlmError, "tempered sampling differs from the original request temperature")
+    else:
+      raise newException(LlmError, "unsupported native sampling mode")
     var promptIds, sampledIds: seq[int]
     var probabilities: seq[float]
     for token in sampling["prompt_token_ids"]:
