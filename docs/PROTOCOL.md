@@ -1,13 +1,15 @@
 # Protocol
 
 Replay protocol: **`sokoban/v1`**. Player socket protocol:
-**`sokoban-player/v2`**.
+**`sokoban-player/v3`**.
 
 ## The Coworld game contract
 
 In: `COGAME_CONFIG_URI`.
 Out: `COGAME_RESULTS_URI`, `COGAME_SAVE_REPLAY_URI`,
-`COGAME_PLAYER_FAILURE_URI`, `COGAME_EVENTS_URI`.
+`COGAME_PLAYER_FAILURE_URI`, `COGAME_EVENTS_URI`. Private checkpoint:
+`COGAME_SAVE_TRAJECTORY_URI` with trusted runtime episode, package version,
+source revision and registered game identity.
 Replay mode: `COGAME_LOAD_REPLAY_URI` + `/client/replay`.
 Bind: `COGAME_HOST` / `COGAME_PORT`.
 
@@ -31,37 +33,61 @@ binary registration frames.
 
 ## The player protocol
 
-The seat sends a registration blob as a Sprite v1 chat frame (`0x81`), and
-re-sends it for the first ~10 s of received frames:
+After `welcome`, the seat sends one registration as a Sprite v1 binary chat
+frame (`0x81`). Registration freezes when the game starts:
 
 ```json
-{"policy": "<label>", "kind": "llm" | "scripted",
- "scripted": "pusher" | "nudger" | null}
+{"type":"register","policy":"label","kind":"llm","prompt":"operator instructions","scripted":null}
 ```
 
-`policy` is rune-truncated at 64. The server records the label and kind, while
-the player's prompt and model credential remain in the player container.
-The cog speaks through `say` in an action reply.
+`policy` is rune-truncated at 64; the private operator prompt at 4000. The
+prompt reaches the authenticated game solely for exact private request joins.
+Public replay records only the policy label and kind. Native inference stays
+in the platform-hosted player container, through `COWORLD_LLM_ENDPOINT` and
+`COWORLD_LLM_MODEL` with the authenticated welcome slot.
 
-The server sends `welcome`, then an `observation` request for each command turn:
+Each command turn has an engine-issued string identity and a separate
+transport budget. The observation contains no transport metadata:
 
 ```json
-{"type":"observation","id":23,"observation":{"board":["…"]},
- "max_actions":8,"turn_budget_ms":9000}
+{"type":"decision","decision_id":"sokoban-23","observation":{"board":["…"]},
+ "max_actions":8,"transport":{"budget_ms":9000,"cleanup_budget_ms":5000}}
 ```
 
-The player responds with the same turn ID and an ordinary action object:
+Before native HTTP begins, the player sends `attempt_started` with the issued
+`decision_id` and singular `training_attempt`. The private attempt includes
+its exact prompt/request and no observed response facts. Later progress keeps
+request identity fixed and preserves received byte prefixes. Finished facts
+cannot change after reader join.
 
 ```json
-{"type":"action","id":23,"source":"llm",
- "action":{"actions":[{"do":"push","box":1,"dir":"R"}],
-           "say":"right crate first","notes":"keep box 0 parked"}}
+{"type":"action","decision_id":"sokoban-23","source":"llm",
+ "action":{"actions":[{"do":"push","box":1,"dir":"R"}],"say":"right crate first","notes":"keep box 0 parked"},
+ "training_attempt":{"attempt_id":"sokoban-23-0"}}
 ```
 
-`source` is `llm`, `scripted`, or `fallback` for replay attribution. Fallback
-replies include a closed `cause` such as `no_credentials`. The game validates
-the action and uses its pusher fallback when a reply is invalid, late, or
-missing. The game then sends `{"done": true, "result": {…}}` at episode end.
+The example abbreviates the required private attempt envelope. Native actions
+require actual complete, joined transport evidence. The engine independently
+checks raw response text, normal parser output and applied directive. Scripted
+and fallback actions use `training_attempt:null`; submitted teacher assertions
+never gain source-controlled teacher authority.
+
+`source` is `llm`, `scripted`, or `fallback` for replay attribution. Missing,
+invalid or late actions use the ordinary private-view pusher fallback. Repaired
+or over-cap native proposals keep their actual applied gameplay but cannot
+be accepted model labels.
+
+At termination, `stop` supplies the latest `decision_id`, a random `stop_id`
+and bounded `cleanup_budget_ms`. Every registered seat must stop and join its
+owned request worker. It returns `stopped` with both IDs, `worker_status`
+(`joined` or `no_active_call`) and all actual attempts. The game retains private
+facts before returning `evidence_received` with the same IDs; the player waits
+for that receipt before closing.
+
+Disconnected or unacknowledged registered owners produce private truncation,
+without normal public result or replay. Private sealing/upload finishes before
+completed `done` and public artifacts. A failed private upload propagates and
+does not reopen sealing or permit later public writes.
 
 A seat that never connects or fails a decision is driven by `pusher`; the
 ladder still reaches its natural end. A no-show sets `deadSeats[0] = true` and

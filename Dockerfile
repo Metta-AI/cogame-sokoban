@@ -1,6 +1,7 @@
 # Build Docker. ONE image, TWO entrypoints: /bin/sokoban (rules, validation,
 # results and replay) and /bin/sokoban-player (scripted or prompt policy).
 FROM debian:bookworm-slim AS build
+SHELL ["/usr/bin/nice", "-n", "19", "/bin/sh", "-c"]
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends \
@@ -31,7 +32,7 @@ COPY nimby.lock .
 RUN nimby --global sync nimby.lock
 
 COPY . .
-ARG NimFlags="-d:release -d:useMalloc --opt:speed --stackTrace:on"
+ARG NimFlags="--parallelBuild:1 -d:release -d:useMalloc --opt:speed --stackTrace:on"
 ARG NimCommand="c"
 ARG NimMain="src/sokoban.nim"
 RUN nim $NimCommand \
@@ -47,6 +48,7 @@ RUN nim $NimCommand \
 
 # Run Docker.
 FROM debian:bookworm-slim
+SHELL ["/usr/bin/nice", "-n", "19", "/bin/sh", "-c"]
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates libcurl4 && \
@@ -58,5 +60,8 @@ COPY --from=build /workspace/sokoban/sokoban-player /bin/sokoban-player
 COPY --from=build /workspace/sokoban/*.json ./
 COPY --from=build /workspace/sokoban/data ./data
 COPY --from=build /workspace/sokoban/client ./client
+RUN find data client -type d -exec chmod 755 {} + && \
+  find data client -type f -exec chmod 644 {} + && \
+  chmod 644 ./*.json
 
 CMD ["/bin/sokoban"]

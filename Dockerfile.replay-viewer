@@ -2,6 +2,7 @@
 # as the native game. The output is architecture-neutral WebAssembly even
 # though this reproducible toolchain container runs as linux/amd64.
 FROM emscripten/emsdk:4.0.15 AS replay-viewer-builder
+SHELL ["/usr/bin/nice", "-n", "19", "/bin/sh", "-c"]
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends ca-certificates curl git && \
@@ -20,8 +21,8 @@ COPY nimby.lock .
 RUN nimby --global sync nimby.lock
 
 COPY . .
-RUN nim c -d:emscripten replay-viewer/sokoban_replay.nim && \
-  nim c -r --hints:off -o:/tmp/gen_wire_constants tools/gen_wire_constants.nim \
+RUN nim c --parallelBuild:1 -d:emscripten replay-viewer/sokoban_replay.nim && \
+  nim c -r --parallelBuild:1 --hints:off -o:/tmp/gen_wire_constants tools/gen_wire_constants.nim \
     > replay-viewer/dist/wire_constants.js && \
   cp client/broadcast_core.js replay-viewer/dist/broadcast_core.js && \
   cp client/chrome_common.js replay-viewer/dist/chrome_common.js && \

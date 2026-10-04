@@ -53,9 +53,10 @@ PLAYER_SCRIPTED=pusher    # a bounded best-first search over push space
 PLAYER_SCRIPTED=nudger    # one ply, no lookahead: the floor
 ```
 
-Hosted prompt players need `--use-bedrock` or a policy-scoped
-`--secret-env ANTHROPIC_API_KEY=...`. Existing hosted prompt policy versions must be reuploaded with player
-credentials before a game version using this protocol is released.
+Hosted prompt players use the dispatcher-provided `COWORLD_LLM_ENDPOINT` and
+`COWORLD_LLM_MODEL`. The player sends its actual welcomed seat through the native
+sidecar. Local native fixtures must configure those variables explicitly.
+A missing endpoint runs an excluded fallback, not a training teacher.
 
 `tools/ci/policies.json` is the shipped set: two `PLAYER_PROMPT` champions
 (`sokoban-lookahead`, `sokoban-orderfirst`) and those two baselines as league

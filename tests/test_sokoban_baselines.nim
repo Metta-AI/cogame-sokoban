@@ -214,41 +214,28 @@ suite "reply validation":
     check directive.say.validateUtf8() == -1
     check directive.notes.validateUtf8() == -1
 
-  test "the 4096-byte provider cap cuts on a rune boundary, not a byte":
-    # The reply cap is a BYTE cap (the design note's reply schema), and
-    # `std/json` does not validate UTF-8, so a plain byte slice that lands
-    # mid-codepoint parses happily and rides the broken byte into `say` and
-    # into the replay. `truncateRunes` downstream only SHORTENS — it cannot
-    # repair a codepoint that was already split — so the cut itself has to be
-    # rune-safe. Build a reply whose 4-byte emoji straddles byte 4096.
-    var text = "{\"say\":\""
-    while text.len < MaxReplyBytes - 2:
-      text.add("x")
-    check text.len == MaxReplyBytes - 2   # the emoji now spans 4094 .. 4097
-    text.add("\u{1F9CA}")
-    text.add("\"}")
-    check text.len > MaxReplyBytes
-    # What the old byte slice did, for contrast: it splits the codepoint.
-    check text[0 ..< MaxReplyBytes].validateUtf8() != -1
-    let cut = text.truncateUtf8Bytes(MaxReplyBytes)
-    check cut.len <= MaxReplyBytes
-    check cut.validateUtf8() == -1
-    # And the whole path: what survives the cut still parses and every string
-    # that reaches the replay is valid UTF-8.
-    let directive = parseDirective(extractJsonObject(cut & "\"}"), 8)
+  test "full native reply remains intact before gameplay rune limits":
+    let speech = "\u{1F9CA}".repeat(1200)
+    let text = $(%*{"say": speech, "notes": speech})
+    check text.len > 4096
+    let reply = parseReplyObject(text)
+    check reply.kind == rokParsed
+    check reply.payload["say"].getStr() == speech
+    check reply.payload["notes"].getStr() == speech
+    let directive = parseDirective(reply.payload, 8)
     check directive.say.runeLen == MaxSayRunes
+    check directive.notes.runeLen == MaxNoteRunes
     check directive.say.validateUtf8() == -1
-    # The provider path uses it — both the envelope read and the text cap.
-    let source = readFile("src/sokoban/player_llm.nim")
-    check source.count("truncateUtf8Bytes") == 2
-    check "MaxReplyBytes]" notin source
+    check directive.notes.validateUtf8() == -1
 
-  test "extractJsonObject tolerates fences and trailing prose":
+  test "reply object parsing tolerates fences and trailing prose":
     let text = "Here you go:\n```json\n{\"actions\":[{\"do\":\"wait\"}]}\n```\n" &
       "Hope that helps."
-    let node = extractJsonObject(text)
-    check node.kind == JObject
-    check node["actions"].len == 1
+    let reply = parseReplyObject(text)
+    check reply.kind == rokParsed
+    check reply.payload["actions"].len == 1
+    check parseReplyObject("private malformed reply").kind == rokRejected
+    check parseReplyObject("{invalid private JSON}").kind == rokRejected
 
 suite "baseline strength is in range":
   test "pusher is inside the band and nudger is no stronger on any tier":

@@ -149,11 +149,18 @@ jobs:
           done
           exit "${fail}"
 
-      - name: Play complete ladders through the numeric training bridge
+      - name: Verify startup interruption and private artifact failure
+        run: |
+          set -euo pipefail
+          nim c -d:release --parallelBuild:1 --threads:on --mm:orc --path:src -o:"${RUNNER_TEMP}/sokoban-runtime" src/sokoban.nim
+          python3 tools/test_runtime_lifecycle.py "${RUNNER_TEMP}/sokoban-runtime"
+
+      - name: Play complete ladders through numeric and hosted-language tasks
         run: |
           set -euo pipefail
           nim c -d:release --path:src -o:"${RUNNER_TEMP}/sokoban-train-bridge" tools/train_bridge.nim
           python3 tools/test_train_bridge.py "${RUNNER_TEMP}/sokoban-train-bridge"
+          python3 tools/test_train_bridge.py "${RUNNER_TEMP}/sokoban-train-bridge" --language
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs
@@ -385,7 +392,7 @@ jobs:
             --soak 10 \
             --strict-text-bounds
 
-      # docker_smoke.sh runs with NO ANTHROPIC_API_KEY, so the CI replay's seat
+      # docker_smoke.sh runs with NO COWORLD_LLM_ENDPOINT, so the CI replay's seat
       # plays scripted and emits no `say` at all: the smoke replay can never
       # exercise the feed's narration path (the cogchemists 2026-08-24 scar).
       # This fixture loads the SHIPPED index.html in an iframe and shims only
