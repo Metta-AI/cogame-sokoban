@@ -1,44 +1,49 @@
-## Export complete scripted-search games as Metta post-training examples.
-## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT EPISODES [FIRST_SEED] [ladder|hard]
+## Export whole episodes using the ordinary private-view pusher policy.
+## The shared reviewed importer owns dataset labels and seed-family splits.
 
-import std/[json, os, osproc, strutils]
-import sokoban/[sim, player_llm]
+import std/[json, options, os, osproc, strutils]
+import sokoban/[sim, policy_view, prompt_render]
+import bitworld/decision_trajectory
 
 const OperatorPrompt = "Plan crate pushes carefully. Check for dead squares before committing."
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 2 .. 4:
-    quit("usage: export_posttrain OUTPUT EPISODES [FIRST_SEED] [ladder|hard]", 1)
+  if args.len != 5:
+    quit("usage: export_posttrain OUTPUT EPISODES FIRST_SEED VARIANT GAME_VERSION", 1)
   let output = args[0]
   let episodes = parseInt(args[1])
-  let firstSeed = if args.len >= 3: parseInt(args[2]) else: 0
-  let variant = if args.len == 4: args[3] else: "ladder"
-  if episodes < 10 or firstSeed < 0:
-    quit("at least ten episodes and a nonnegative first seed are required", 1)
+  let firstSeed = parseInt(args[2])
+  let variant = args[3]
+  let gameVersion = args[4]
+  if episodes < 10 or firstSeed < 0 or gameVersion.len == 0:
+    quit("at least ten episodes, a nonnegative seed and game version are required", 1)
   if variant notin ["ladder", "hard"]:
     quit("variant must be ladder or hard", 1)
   if dirExists(output) or fileExists(output):
     quit("output already exists: " & output, 1)
-  createDir(output)
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   let manifest = parseFile("coworld_manifest_template.json")
-  var variantConfig: JsonNode
+  var variantConfig = newJNull()
   for entry in manifest["variants"]:
     if entry["id"].getStr() == variant:
       variantConfig = entry["game_config"]
-  doAssert not variantConfig.isNil
-  var
-    trainRows: seq[string]
-    validationRows: seq[string]
-    runs = newJArray()
+  doAssert variantConfig.kind == JObject
+  createDir(output)
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
+  var trajectoryRows: seq[string]
+  var runs = newJArray()
+  var teacherDecisions = 0
   for seed in firstSeed ..< firstSeed + episodes:
     var config = configFromJson(variantConfig)
     config.seed = int64(seed)
     config.validate()
     let sim = newSimServer(config)
     sim.phase = phPlaying
-    var rows: seq[string]
+    let episodeId = "sokoban-" & variant & "-" & $seed
+    let trajectory = newDecisionTrajectory(episodeId, "sokoban-" & $seed,
+      "sokoban", gameVersion, sourceRevision)
+    var decisions = 0
     while not sim.episodeOver():
       if sim.needsLevel():
         let index = sim.levelIndex + 1
@@ -47,51 +52,47 @@ when isMainModule:
       if not sim.levelActive:
         break
       let view = sim.observationJson(0)
-      let directive = sim.scriptedDirective(blPusher)
-      let completion = %*{
-        "actions": directive.actionsJson(),
-        "say": directive.say,
-        "notes": directive.notes
-      }
+      let proposal = scriptedPlanForView(view, blPusher)
+      let offered = %*{"actions": proposal.actionsJson(),
+        "say": proposal.say, "notes": proposal.notes}
+      let directive = parseDirective(offered, config.maxActionsPerTurn)
+      let completion = directive.directiveJson()
       let parsed = parseDirective(completion, config.maxActionsPerTurn)
       doAssert $parsed.actionsJson() == $directive.actionsJson()
-      rows.add($(%*{
-        "episode_id": "sokoban-" & variant & "-" & $seed,
-        "seed": "sokoban-" & variant & "-" & $seed,
-        "decision_id": sim.turnsPlayed,
-        "prompt": [
-          {"role": "system", "content": SystemPrompt},
-          {"role": "user", "content": userMessage(OperatorPrompt, $view)}
-        ],
-        "completion": [{"role": "assistant", "content": $completion}],
-        "game": "sokoban",
-        "action_schema_revision": "sokoban-directive-v1"
-      }))
-      sim.beginTurn(directive)
+      let decisionId = $sim.turnsPlayed
+      var attempt = newDecisionAttempt(decisionId & "-teacher",
+        "pusher-private-view", aoTeacher)
+      attempt.prompt = %*[{"role": "system", "content": SystemPrompt},
+        {"role": "user", "content": userMessage(OperatorPrompt, $view)}]
+      attempt.response = %($completion)
+      attempt.parsedAction = completion
+      attempt.accepted = true
+      sim.beginTurn(parsed)
       while not sim.turnComplete():
         sim.stepTick()
-      sim.endTurn(directive.notes)
+      sim.endTurn(parsed.notes)
+      trajectory.recordDecision(decisionId, "0", view, @[attempt],
+        some(attempt.attemptId), completion, asAccepted,
+        terminal = sim.episodeOver())
+      inc decisions
+      inc teacherDecisions
     sim.settle(endComplete,
       if sim.ladderComplete(): erLadderComplete else: erTurnCap)
-    doAssert rows.len > 0
-    doAssert sim.reason == endComplete
-    if seed mod 5 == 0:
-      validationRows.add(rows)
-    else:
-      trainRows.add(rows)
-    runs.add(%*{"seed": seed, "decisions": rows.len,
+    doAssert decisions > 0 and sim.reason == endComplete
+    let outcome = sim.ladderResultsJson()
+    outcome["engine_rules_version"] = %GameVersion
+    let participantOutcomes = %*{"0": outcome["scores"][0]}
+    trajectory.finish(esCompleted, outcome, participantOutcomes)
+    trajectoryRows.add(trajectory.eventsJsonl().strip())
+    runs.add(%*{"seed": seed, "decisions": decisions,
       "score": sim.episodeScore(), "levels_solved": sim.levelsSolved()})
-  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
-  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  writeFile(output / "manifest.json", pretty(%*{
-    "schema_version": 1,
-    "game": "sokoban",
-    "variant": variant,
-    "source_revision": sourceRevision,
-    "teacher": "scripted-pusher-search",
-    "operator_prompt": OperatorPrompt,
-    "train_examples": trainRows.len,
-    "validation_examples": validationRows.len,
+  writePrivate(output / "trajectories.jsonl", trajectoryRows.join("\n") & "\n")
+  writePrivate(output / "manifest.json", pretty(%*{
+    "schema_version": 1, "game": "sokoban", "variant": variant,
+    "source_revision": sourceRevision, "game_version": gameVersion,
+    "teacher": "pusher-private-view", "operator_prompt": OperatorPrompt,
+    "episodes": episodes, "decisions": teacherDecisions,
+    "dataset_path": "canonical-trajectories-only; shared reviewed importer owns splits",
     "runs": runs
   }) & "\n")
-  echo "train=", trainRows.len, " validation=", validationRows.len
+  echo "complete_episodes=", episodes, " decisions=", teacherDecisions

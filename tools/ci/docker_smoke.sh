@@ -38,8 +38,8 @@
 #                              job loads it in a real browser -- that is the
 #                              only replay in CI that is known to be readable
 #                              by this game's own viewer.
-#   ANTHROPIC_API_KEY          if set, forwarded to the players for prompt
-#                              policies; the game never receives model keys
+#   COWORLD_LLM_ENDPOINT      if set, forwarded to native prompt players
+#   COWORLD_LLM_MODEL         native model requested by those players
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -190,11 +190,12 @@ chmod 777 "${work_dir}"
 docker network create "${network}" >/dev/null
 
 player_env=()
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-  player_env+=(-e "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
-  echo "ANTHROPIC_API_KEY present: prompt players can call the model"
+if [ -n "${COWORLD_LLM_ENDPOINT:-}" ]; then
+  player_env+=(-e "COWORLD_LLM_ENDPOINT=${COWORLD_LLM_ENDPOINT}")
+  player_env+=(-e "COWORLD_LLM_MODEL=${COWORLD_LLM_MODEL:?native smoke requires a model}")
+  echo "native endpoint configured for prompt players"
 else
-  echo "no ANTHROPIC_API_KEY: prompt players fall back to pusher"
+  echo "no native endpoint: prompt players run excluded pusher fallbacks"
 fi
 
 echo "starting game container (${image} ${game_bin}) ..."

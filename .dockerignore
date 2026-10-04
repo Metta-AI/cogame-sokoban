@@ -7,3 +7,10 @@ tmp
 build
 replay-viewer/dist
 *.tmp
+
+# Private trajectory/corpus artifacts never enter public game/player images.
+*.jsonl
+teacher-*/
+corpus/
+training-data/
+*-proof*/

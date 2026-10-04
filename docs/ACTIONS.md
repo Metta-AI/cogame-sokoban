@@ -71,8 +71,8 @@ the agent's own score, and its own real policy name.
 | `actions[].x`, `.y` | required for `goto`; clamped to 0 … 9 |
 | `say` | ≤ **140** runes — drawn in the spectator feed, never fed back to the seat |
 | `notes` | ≤ **320** runes — private scratchpad, echoed to this seat only next turn |
-| whole reply | ≤ 4096 bytes read from the provider before parsing |
-| `PLAYER_PROMPT` | ≤ 4000 runes in the player process; never sent to the game |
+| whole reply | full native response retained privately before normal parsing; private socket frames have a 16 MiB transport bound |
+| `PLAYER_PROMPT` | ≤ 4000 runes; authenticated private registration joins the exact request, never public replay |
 
 **Invalid actions are dropped, never rewritten.** In a game where one wrong push
 is fatal, repairing a malformed push into a different push would let the *game*

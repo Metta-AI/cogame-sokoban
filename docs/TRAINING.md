@@ -1,45 +1,78 @@
 # Metta post-training data
 
-The maintained native simulator and its bounded `pusher` search policy can
-produce supervised fine-tuning examples without a model provider:
+The source-controlled `pusher-private-view` teacher uses the ordinary private
+observation, prompt renderer, reply parser, and simulator. It requires no
+model provider. Export complete games from a clean, committed checkout:
 
 ```sh
 nimby sync nimby.lock
-nim r -d:release --path:src tools/export_posttrain.nim \
-  /tmp/sokoban-posttrain 10
-nim r -d:release --path:src tools/export_posttrain.nim \
-  /tmp/sokoban-hard-posttrain 10 0 hard
+nim c -d:release --path:src -o:/tmp/sokoban-export tools/export_posttrain.nim
+revision=$(git rev-parse HEAD)
+/tmp/sokoban-export /tmp/sokoban-ladder-events 20 1 ladder "source-$revision"
+/tmp/sokoban-export /tmp/sokoban-hard-events 20 1 hard "source-$revision"
 ```
 
-The exporter covers the certified tier and hard ladder variants. It runs
-complete seeded six-level games. Every row contains the
-system prompt used by the hosted game, the full player-visible observation,
-and a search-policy action that round-trips through the game's reply parser.
-Train and validation split by episode seed, so turns from one game cannot
-cross splits. `manifest.json` records the source revision, teacher, per-seed
-scores and solved levels, and row counts. The exporter refuses to overwrite
-an existing output directory.
+The five arguments are output directory, episode count, first seed, variant,
+and game version. Each directory contains private `trajectories.jsonl` events
+and `manifest.json`. The exporter refuses existing directories. Source versions
+are diagnostic editions, not published package versions.
 
-From Metta, train the shared post-training pipeline on the resulting JSONL:
+Convert event records using the shared Coworld SDK in Metta. Choose new output
+paths and preserve the raw corpus and manifest:
 
 ```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/sokoban-posttrain \
-  --output /tmp/sokoban-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 2048
+nix develop -c uv run --package metta-posttrain python - <<'PY'
+from pathlib import Path
+from coworld.decision_trajectory import export_complete_episodes, read_trajectory_jsonl
+
+for variant in ("ladder", "hard"):
+    export_complete_episodes(
+        read_trajectory_jsonl(Path(f"/tmp/sokoban-{variant}-events/trajectories.jsonl")),
+        Path(f"/tmp/sokoban-{variant}-complete.jsonl"),
+    )
+PY
 ```
 
-This dataset distills the scripted search teacher. It does not claim that a
-model found a plan, that a rejected reply was accepted, or that a higher
-league score will follow. The exported prompts contain only the observation
-the search policy received; episode seeds and later levels stay hidden.
+An independent reviewer must verify the exact source, private observations,
+prompts, normal parsed and applied actions, and terminal engine outcomes.
+The reviewer supplies `HostedImportAuthority` bound to the complete file's
+SHA256. The game exporter cannot grant this authority. After review, import
+one corpus using the reviewer-provided authority file:
 
-A local 10-game tier-ladder proof exported 274 train and 70 validation examples. All 344
-fit a 2048-token smoke model; one CPU optimizer update reduced validation
-loss from 1.7541 to 1.7477. The 10 games solved 1–4 levels each.
-The hard ladder exported 277 train and 83 validation examples from 10 games.
-All 360 fit the same model; one CPU update reduced validation loss from
-1.7590 to 1.7526.
+```sh
+nix develop -c uv run --package metta-posttrain python - <<'PY'
+from pathlib import Path
+from metta_posttrain.hosted import export_hosted
+from metta_posttrain.hosted_receipts import HostedImportAuthority
+
+export_hosted(
+    Path("/tmp/sokoban-ladder-complete.jsonl"),
+    Path("/tmp/sokoban-ladder-reviewed-dataset"),
+    target_policy="pusher-private-view",
+    authority=HostedImportAuthority.model_validate_json(
+        Path("/tmp/sokoban-ladder-reviewed-authority.json").read_bytes()
+    ),
+)
+PY
+```
+
+Repeat with the hard corpus and its own reviewed authority. The shared importer
+owns train/validation splits by seed family. Never train directly from raw event
+directories or create local modulo splits. Rejected and repaired proposals cannot
+be accepted supervision. Scripted teachers have no model-serving metadata.
+Model-derived labels additionally require authenticated platform receipts.
+
+Use the resulting reviewed dataset as the training pipeline input. Its
+`train.jsonl`, `validation.jsonl`, `manifest.json`, and `authority.json` preserve
+label provenance and the reviewed split. Select the training command and model
+profile from the current Metta post-training workflow; the historical
+`python -m metta_posttrain.train` entrypoint is not maintained.
+
+Historical CPU smoke results used an earlier exporter and ten-game profile:
+344 tier-ladder labels changed validation loss from 1.7541 to 1.7477;
+360 hard-ladder labels changed it from 1.7590 to 1.7526 after one update.
+Those archived results lack a source revision recorded here. They do not qualify
+the current source, reviewed importer, published runtime, or model strength.
 
 # Numeric reinforcement learning
 

@@ -1,151 +1,215 @@
-## Sokoban player: scripted search or prompt model from one observation.
-## The game receives only metadata and ordinary plans; prompts and model
-## credentials remain in this player process.
-##
-## To field your own policy, reuse this image and set PLAYER_PROMPT:
-##   coworld upload-policy coworld-sokoban --name my-sokoban \
-##     --run /bin/sokoban-player --secret-env PLAYER_PROMPT="<your strategy>"
+## Sokoban container player owns native inference over the issued private view.
+import std/[atomics, json, locks, math, monotimes, options, os, strutils, times]
+import bitworld/[decision_trajectory, native_http, native_stop, native_websocket,
+  spriteprotocol]
+import sokoban/[baselines, directives, model_pacing, player_llm, policy_view,
+  prompt_policy, sim_types]
 
-import std/[json, options, os, strutils, times]
-import bitworld/spriteprotocol
-import whisky
-import sokoban/sim_types
-import sokoban/[baselines, directives, model_pacing, player_llm,
-  policy_view, prompt_policy]
+type PlayerCall = object
+  socket: ptr NativeWebSocket
+  decisionId, observation, prompt, policy: string
+  deadline: MonoTime
+  slot, maxActions: int
+  scripted: string
 
-const
-  ConnectAttempts = 6
-  ConnectBackoffMs = 250
-  ReRegisterSeconds = 10.0
-    ## The registration blob is RE-SENT for the first ~10 s of received frames:
-    ## a first send can race the server's slot bookkeeping and the seat then
-    ## plays the default baseline for the whole episode with no error anywhere
-    ## (the paintball 2026-08-25 slot-sequential-join scar).
+var
+  worker: Thread[void]
+  jobs: Channel[PlayerCall]
+  busy, cancelPending: Atomic[bool]
+  evidenceLock: Lock
+  activeControl: ptr NativeRequestControl
+  workerEvidence: string
 
-proc fallbackAction(view: JsonNode): JsonNode =
-  let plan = scriptedPlanForView(view, blPusher)
-  %*{"actions": plan.actionsJson()}
+initLock(evidenceLock)
+
+proc cancelDecision() =
+  cancelPending.store(true)
+  withLock evidenceLock:
+    if activeControl != nil: activeControl[].cancelNativeRequest()
+
+proc runDecision(call: PlayerCall, pacer: var ModelPacer) {.gcsafe.} =
+  var control: NativeRequestControl
+  {.gcsafe.}:
+    withLock evidenceLock:
+      activeControl = control.addr
+      if cancelPending.load(): control.cancelNativeRequest()
+  defer:
+    {.gcsafe.}:
+      withLock evidenceLock: activeControl = nil
+    busy.store(false)
+  let view = parseJson(call.observation)
+  let client = newLlmClient()
+  var action: JsonNode
+  var source = "scripted"
+  var cause = ""
+  let progress = proc(attempt: DecisionAttempt) {.gcsafe.} =
+    let evidence = attempt.attemptEvidenceJson()
+    {.gcsafe.}:
+      withLock evidenceLock:
+        var attempts = if workerEvidence.len > 0: parseJson(workerEvidence) else: newJArray()
+        var replaced = false
+        for index in 0 ..< attempts.len:
+          if attempts[index]["attempt_id"] == evidence["attempt_id"]:
+            attempts.elems[index] = evidence
+            replaced = true
+            break
+        if not replaced: attempts.add(evidence)
+        workerEvidence = $attempts
+    let sent = call.socket[].sendNativeText($ %*{
+      "type": "attempt_started", "decision_id": call.decisionId,
+      "training_attempt": evidence}, call.deadline)
+    if sent.kind != wsReady:
+      raise newException(ValueError, "private attempt progress was not delivered")
+  if call.scripted.len > 0:
+    let directive = scriptedPlanForView(view, parseBaseline(call.scripted))
+    action = %*{"actions": directive.actionsJson(), "say": directive.say,
+      "notes": directive.notes}
+  elif client.disabled:
+    let directive = scriptedPlanForView(view, blPusher)
+    action = %*{"actions": directive.actionsJson(), "say": directive.say,
+      "notes": directive.notes}
+    source = "fallback"
+    cause = "no_endpoint"
+  else:
+    try:
+      action = choosePromptPlan(client, pacer, view, call.prompt,
+        call.maxActions, call.deadline, call.slot, call.decisionId, call.policy,
+        control, progress)
+      source = "llm"
+    except RateGuardError:
+      let directive = scriptedPlanForView(view, blPusher)
+      action = %*{"actions": directive.actionsJson(), "say": directive.say,
+        "notes": directive.notes}
+      source = "fallback"
+      cause = "rate_guard"
+    except CatchableError:
+      let directive = scriptedPlanForView(view, blPusher)
+      action = %*{"actions": directive.actionsJson(), "say": directive.say,
+        "notes": directive.notes}
+      source = "fallback"
+      cause = "native_or_directive_rejected"
+  if interruptionRequested() or control.nativeRequestCanceled(): return
+  let evidence = if client.attempts.len > 0:
+    client.attempts[^1].attemptEvidenceJson() else: newJNull()
+  discard call.socket[].sendNativeText($ %*{"type": "action",
+    "decision_id": call.decisionId, "source": source, "cause": cause,
+    "action": action, "training_attempt": evidence}, call.deadline)
+
+proc runWorker() {.gcsafe.} =
+  var pacer = newModelPacer()
+  while not interruptionRequested():
+    let received = jobs.tryRecv()
+    if received.dataAvailable:
+      runDecision(received.msg, pacer)
+    else:
+      sleep(5)
+
+proc stopAndAcknowledge(socket: NativeWebSocket, decisionId, stopId: JsonNode,
+    cleanupDeadline: MonoTime): bool =
+  requestNativeStop()
+  cancelDecision()
+  joinThread(worker)
+  var attempts = newJArray()
+  withLock evidenceLock:
+    if workerEvidence.len > 0: attempts = parseJson(workerEvidence)
+  let sent = socket.sendCleanupText($ %*{"type": "stopped",
+    "decision_id": decisionId, "stop_id": stopId,
+    "worker_status": "joined", "attempts": attempts}, cleanupDeadline)
+  if sent.kind != wsReady: return false
+  while getMonoTime() < cleanupDeadline:
+    let received = socket.receiveCleanupText(cleanupDeadline)
+    if received.kind != wsMessage: return false
+    let frame = parseJson(received.data)
+    if frame["type"].getStr() == "evidence_received" and
+        frame["decision_id"] == decisionId and frame["stop_id"] == stopId:
+      return true
+  false
 
 when isMainModule:
-  var url = getEnv("COWORLD_PLAYER_WS_URL")
-  if url.len == 0:
-    url = getEnv("COGAMES_ENGINE_WS_URL")   ## the legacy alias
-  if url.len == 0:
-    quit("COWORLD_PLAYER_WS_URL is not set", 1)
+  installNativeStopHandlers()
+  let url = getEnv("COWORLD_PLAYER_WS_URL")
+  if url.len == 0: quit("COWORLD_PLAYER_WS_URL is not set", 1)
   let prompt = getEnv("PLAYER_PROMPT").truncateRunes(MaxPromptRunes)
-  let scripted = getEnv("PLAYER_SCRIPTED").strip()
-  let label = getEnv("PLAYER_POLICY_LABEL").truncateRunes(MaxPolicyLabelRunes)
-  let promptClient =
-    if prompt.strip().len > 0 and scripted.len == 0:
-      newLlmClient()
-    else:
-      nil
-  var pacer =
-    if promptClient != nil: newModelPacer()
-    else: ModelPacer()
-
-  let registration = $(%*{
-    "policy": (if label.len > 0: label
-               elif prompt.strip().len > 0: "llm"
-               elif scripted.len > 0: scripted
-               else: "pusher"),
-    "scripted": (if scripted.len > 0: %scripted else: newJNull()),
-    "kind": (if prompt.strip().len > 0: "llm" else: "scripted")
-  })
-
-  var socket: WebSocket = nil
-  for attempt in 1 .. ConnectAttempts:
-    try:
-      socket = newWebSocket(url)
-      break
-    except CatchableError as error:
-      echo "sokoban player: connect attempt ", attempt, " failed: ", error.msg
-      if attempt == ConnectAttempts:
-        ## A bounded retry, then leave quietly: the game declares the no-show
-        ## itself and plays the seat on the pusher baseline.
-        echo "sokoban player: giving up on ", url
-        quit(0)
-      sleep(ConnectBackoffMs * attempt)
-
-  proc sendRegistration() =
-    try:
-      socket.send(blobFromSpriteChat(registration), BinaryMessage)
-    except CatchableError as error:
-      echo "sokoban player: registration send failed: ", error.msg
-
-  sendRegistration()
-  echo "sokoban player: registered ",
-    (if scripted.len > 0: scripted
-     elif prompt.len > 0: "prompt" else: "pusher")
-
-  let started = epochTime()
-  while true:
-    ## whisky's `receiveMessage` RAISES rather than returning none on both a
-    ## close frame and a half-read one, and mummy's `send` only queues: the
-    ## game writes its artifacts and exits, so a seat can lose the socket
-    ## before its `done` frame is flushed. EXIT 0 on a dead socket — a player
-    ## that dies here fails certification with `player_error` (the raid 0.1.3
-    ## close-frame race).
-    var received: Option[Message]
-    try:
-      received = socket.receiveMessage()
-    except CatchableError as error:
-      echo "sokoban player: connection ended (", error.msg, "), exiting"
-      break
-    if received.isNone:
-      echo "sokoban player: connection closed, exiting"
-      break
-    if epochTime() - started < ReRegisterSeconds:
-      sendRegistration()
-    let message = received.get()
-    if message.kind != TextMessage:
-      continue
-    try:
-      let payload = parseJson(message.data)
-      if payload{"done"}.getBool():
-        echo "sokoban player: final score ", payload{"result"}{"scores"}
-        break
-      case payload{"type"}.getStr()
-      of "welcome":
-        echo "sokoban player: seated at slot ", payload{"slot"}.getInt(),
-          " as ", payload{"alias"}.getStr()
-        sendRegistration()
-      of "observation":
-        let view = payload["observation"]
-        var plan: JsonNode
-        var source = "scripted"
-        var cause = ""
-        if prompt.strip().len > 0 and scripted.len == 0:
-          try:
-            plan = choosePromptPlan(promptClient, pacer, view, prompt,
-              payload["max_actions"].getInt(),
-              payload["turn_budget_ms"].getInt())
-            source = "llm"
-          except RateGuardError as error:
-            echo "sokoban prompt player: rate guard: ", error.msg
-            plan = fallbackAction(view)
-            source = "fallback"
-            cause = "rate_guard"
-          except CatchableError as error:
-            echo "sokoban prompt player: fallback to pusher: ", error.msg
-            plan = fallbackAction(view)
-            source = "fallback"
-            cause = if promptClient.disabled: "no_credentials"
-                    else: "transport_error"
-        else:
-          let scriptedPlan = scriptedPlanForView(view,
-            parseBaseline(scripted))
-          plan = %*{"actions": scriptedPlan.actionsJson(),
-                    "say": scriptedPlan.say, "notes": scriptedPlan.notes}
-        socket.send($(%*{
-          "type": "action", "id": payload["id"],
-          "source": source, "cause": cause, "action": plan}))
-      else:
-        discard
-    except CatchableError as error:
-      echo "sokoban player: ignoring bad frame: ", error.msg
+  var scripted = getEnv("PLAYER_SCRIPTED").strip()
+  if prompt.strip().len == 0 and scripted.len == 0: scripted = "pusher"
+  if scripted.len > 0: discard parseBaseline(scripted)
+  let policy = getEnv("PLAYER_POLICY_LABEL", "sokoban").truncateRunes(MaxPolicyLabelRunes)
+  let timeout = getEnv("COWORLD_TIMEOUT_SECONDS", "1200").parseFloat()
+  if timeout <= 0 or classify(timeout) in {fcNan, fcInf, fcNegInf}:
+    raise newException(ValueError, "player timeout must be finite and positive")
+  let started = getMonoTime()
+  let deadline = started + initDuration(nanoseconds = int64(timeout * 1_000_000_000))
+  let connection = connectNativeWebSocket(url,
+    min(deadline, started + initDuration(seconds = 30)), 16 * 1024 * 1024)
+  case connection.kind
+  of wsInterrupted, wsDeadline: quit(0)
+  of wsReady: discard
+  else: raise newException(ValueError, "player connection failed")
+  var socket = connection.socket
+  var decisionId = newJNull()
+  var slot = -1
+  var cleanupBudgetMs = 0
+  var joined = false
+  var registered = false
+  jobs.open()
+  createThread(worker, runWorker)
   try:
-    socket.close()
-  except CatchableError:
-    discard
-  quit(0)
+    while getMonoTime() < deadline:
+      if interruptionRequested(): break
+      let received = receiveNativeText(socket, min(deadline,
+        getMonoTime() + initDuration(milliseconds = 50)))
+      case received.kind
+      of wsDeadline, wsInterrupted: continue
+      of wsClosed: break
+      of wsMessage: discard
+      else: raise newException(ValueError, "player transport failed")
+      let payload = parseJson(received.data)
+      case payload["type"].getStr()
+      of "welcome":
+        if registered: raise newException(ValueError, "duplicate player welcome")
+        slot = payload["slot"].getInt()
+        if slot < 0: raise newException(ValueError, "invalid player slot")
+        let registration = $ %*{"type": "register", "policy": policy,
+          "prompt": prompt, "kind": (if scripted.len > 0: "scripted" else: "llm"),
+          "scripted": (if scripted.len > 0: %scripted else: newJNull())}
+        let sent = sendNativeBinary(socket, blobFromSpriteChat(registration), deadline)
+        if sent.kind != wsReady: raise newException(ValueError, "player registration failed")
+        registered = true
+      of "decision":
+        if not registered: raise newException(ValueError, "decision before registration")
+        let receivedAt = getMonoTime()
+        let issuedId = payload["decision_id"]
+        if issuedId.kind != JString or issuedId.getStr().len == 0:
+          raise newException(ValueError, "decision identity must be a nonempty string")
+        let budgetMs = payload["transport"]["budget_ms"].getInt()
+        cleanupBudgetMs = payload["transport"]["cleanup_budget_ms"].getInt()
+        if budgetMs <= 0 or cleanupBudgetMs < 0:
+          raise newException(ValueError, "invalid decision transport budget")
+        let decisionDeadline = min(deadline, receivedAt + initDuration(milliseconds = budgetMs))
+        if busy.load(): cancelDecision()
+        while busy.load() and getMonoTime() < decisionDeadline and not interruptionRequested():
+          sleep(5)
+        if interruptionRequested(): break
+        if busy.load(): raise newException(ValueError, "previous decision owner did not join")
+        decisionId = issuedId
+        withLock evidenceLock: workerEvidence.setLen(0)
+        cancelPending.store(false)
+        busy.store(true)
+        jobs.send(PlayerCall(socket: socket.addr, decisionId: issuedId.getStr(),
+          observation: $payload["observation"], prompt: prompt, policy: policy,
+          maxActions: payload["max_actions"].getInt(), scripted: scripted,
+          slot: slot, deadline: decisionDeadline))
+      of "stop":
+        joined = true
+        discard stopAndAcknowledge(socket, payload["decision_id"], payload["stop_id"],
+          getMonoTime() + initDuration(milliseconds = payload["cleanup_budget_ms"].getInt()))
+        break
+      of "final": break
+      of "turn", "state", "evidence_received": discard
+      else: raise newException(ValueError, "unknown player packet")
+  finally:
+    if not joined:
+      discard stopAndAcknowledge(socket, decisionId, newJNull(),
+        getMonoTime() + initDuration(milliseconds = cleanupBudgetMs))
+    jobs.close()
+    closeNativeWebSocket(socket)

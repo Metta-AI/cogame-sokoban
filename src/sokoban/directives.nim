@@ -69,16 +69,22 @@ proc sanitizeNote*(text: string): string =
   ## observation. Newlines collapse so one record stays one line.
   text.replace("\n", " ").replace("\r", " ").strip().truncateRunes(MaxNoteRunes)
 
-proc extractJsonObject*(text: string): JsonNode =
-  ## The outermost balanced `{...}` in a model reply, tolerating markdown
-  ## fences and any prose the model prefixed or suffixed. Falls back to
-  ## first-brace..last-brace when the scan finds no balanced pair, which is what
-  ## recovers a reply whose braces sit inside a quoted string.
+type
+  ReplyObjectKind* = enum
+    rokParsed, rokRejected
+  ReplyObject* = object
+    case kind*: ReplyObjectKind
+    of rokParsed: payload*: JsonNode
+    of rokRejected: reason*: string
+
+proc parseReplyObject*(text: string): ReplyObject =
+  ## The same tolerant object extraction is shared by native and training calls.
   var
     depth = 0
     start = -1
     inString = false
     escaped = false
+    candidates: seq[string]
   for i, ch in text:
     if inString:
       if escaped: escaped = false
@@ -94,21 +100,20 @@ proc extractJsonObject*(text: string): JsonNode =
       if depth > 0:
         dec depth
         if depth == 0 and start >= 0:
-          try:
-            return parseJson(text[start .. i])
-          except CatchableError:
-            start = -1
+          candidates.add(text[start .. i])
     else: discard
-  let
-    first = text.find('{')
-    last = text.rfind('}')
+  let first = text.find('{')
+  let last = text.rfind('}')
   if first < 0 or last <= first:
-    var head = text.strip()
-    if head.runeLen > 160:
-      head = head.truncateRunes(160) & "..."
-    raise newException(
-      DirectiveError, "no JSON object in reply: " & head.replace("\n", " "))
-  parseJson(text[first .. last])
+    return ReplyObject(kind: rokRejected, reason: "no_json_object")
+  candidates.add(text[first .. last])
+  for candidate in candidates:
+    try:
+      return ReplyObject(kind: rokParsed, payload: parseJson(candidate))
+    except CatchableError:
+      # The existing domain parse boundary returns a stable private-safe result.
+      discard
+  ReplyObject(kind: rokRejected, reason: "invalid_json_object")
 
 proc readInt(node: JsonNode): tuple[ok: bool, value: int] =
   ## An int, a float, or a numeric string. Anything non-finite or unparseable
@@ -216,6 +221,9 @@ proc actionsJson*(directive: Directive): JsonNode =
   result = newJArray()
   for action in directive.actions:
     result.add(action.actionJson())
+
+proc directiveJson*(directive: Directive): JsonNode =
+  %*{"actions": directive.actionsJson(), "say": directive.say, "notes": directive.notes}
 
 proc boundedRecord*(record: JsonNode, sayKey, notesKey: string): string =
   ## The serialized record, guaranteed <= MaxDirectiveRunes. The free text is

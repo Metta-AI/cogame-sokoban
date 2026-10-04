@@ -12,8 +12,10 @@
 ## meant it. The seed is randomised by the runner, never disclosed to the seat,
 ## and spans 2^63.
 
-import std/[json, strutils, sysrand]
-import bitworld/runtime
+import std/[json, math, monotimes, os, strutils, sysrand, times]
+import bitworld/[native_http, runtime, runtime_input]
+import bitworld/native_stop
+import bitworld/decision_trajectory
 import sokoban/[server, sim_config, sim_types]
 
 proc randomSeed(): int64 =
@@ -35,34 +37,61 @@ proc seedPinned(configText: string): bool =
     false
 
 when isMainModule:
+  installNativeStopHandlers()
+  let processStarted = getMonoTime()
+  var episodeDeadline = processStarted + initDuration(seconds = 1200)
+  var inputControl: NativeRequestControl
+  var inputCaptures: seq[RuntimeInputCapture]
   var runtimeConfig: RuntimeConfig
   try:
-    runtimeConfig = readRuntimeConfig()
+    let timeout = getEnv("COWORLD_TIMEOUT_SECONDS", "1200").parseFloat()
+    if timeout <= 0 or classify(timeout) in {fcNan, fcInf, fcNegInf}:
+      raise newException(ValueError, "episode timeout must be finite and positive")
+    episodeDeadline = processStarted + initDuration(nanoseconds = int64(timeout * 1_000_000_000))
+    let inputDeadline = min(episodeDeadline - initDuration(seconds = ShutdownGraceSeconds),
+      processStarted + initDuration(seconds = 60))
+    proc input(value, source: string): string =
+      readRuntimeInput(value, source, inputDeadline, inputControl,
+        16 * 1024 * 1024, 64 * 1024, inputCaptures)
+    runtimeConfig = readRuntimeConfig(input)
   except CatchableError as error:
-    quit("sokoban: bad runtime configuration: " & error.msg, 2)
+    let status = if interruptionRequested(): esTruncated else: esFailed
+    writeInitializationCheckpoint(status, "runtime_config", $error.name, error.msg,
+      episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+    if status == esTruncated: quit(0)
+    quit("sokoban: runtime configuration rejected (" & $error.name & ")", 2)
 
+  if interruptionRequested():
+    writeInitializationCheckpoint(esTruncated, "runtime_config", "stop_requested",
+      "process stop requested", episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+    quit(0)
   if runtimeConfig.replayMode:
-    runReplayServer(runtimeConfig)
+    runReplayServer(runtimeConfig, episodeDeadline)
   else:
     if runtimeConfig.config.strip().len == 0:
+      writeInitializationCheckpoint(esFailed, "game_config", "missing_config", "COGAME_CONFIG_URI is required",
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
       quit("sokoban: COGAME_CONFIG_URI is required (no game config given)", 2)
     var config = defaultConfig()
     try:
       config.update(parseJson(runtimeConfig.config))
     except CatchableError as error:
-      quit("sokoban: invalid game config: " & error.msg, 2)
+      writeInitializationCheckpoint(esFailed, "game_config", $error.name, error.msg,
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+      quit("sokoban: game configuration rejected (" & $error.name & ")", 2)
     if not seedPinned(runtimeConfig.config):
       config.seed = randomSeed()
       echo "sokoban: seed not pinned; randomized to ", config.seed
     try:
       config.validate()
+      if config.tokens.len == 0:
+        raise newException(SokobanError, "game config must carry one token per seat")
+      if config.players.len != config.numAgents:
+        raise newException(SokobanError, "game config must name every seat")
     except CatchableError as error:
-      quit("sokoban: invalid game config: " & error.msg, 2)
-    if config.tokens.len == 0:
-      quit("sokoban: the game config must carry one token per seat", 2)
-    if config.players.len != config.numAgents:
-      quit("sokoban: the game config must name " & $config.numAgents &
-        " players", 2)
+      writeInitializationCheckpoint(esFailed, "game_config", $error.name, error.msg,
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+      quit("sokoban: game configuration rejected (" & $error.name & ")", 2)
     echo "sokoban: seats=", config.numAgents,
       " variant=", config.variant,
       " levels=", config.levelCount,
@@ -71,6 +100,9 @@ when isMainModule:
       " wallClock=", config.wallClockBudgetSeconds, "s",
       " turnBudgetMs=", config.turnBudgetMs
     try:
-      runGameServer(config, runtimeConfig)
+      runGameServer(config, runtimeConfig, episodeDeadline,
+        runtimeInputCapturesJson(inputCaptures))
     except CatchableError as error:
-      quit("sokoban: " & error.msg, 2)
+      writeInitializationCheckpoint(esFailed, "runtime_owner", $error.name, error.msg,
+        episodeDeadline, runtimeInputCapturesJson(inputCaptures))
+      quit("sokoban: runtime owner failed (" & $error.name & ")", 2)

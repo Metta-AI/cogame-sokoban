@@ -1,10 +1,10 @@
-## Persistent JSONL bridge for single-seat Metta RL and native PufferLib.
+## Separate numeric and hosted-language tasks over the same ordinary Sim turns.
 ## nim c -d:release --path:src -o:sokoban-train-bridge tools/train_bridge.nim
 
 import std/[json, os]
-import sokoban/[sim, player_llm]
+import sokoban/[sim, policy_view, prompt_render]
 
-const OperatorPrompt = "Plan crate pushes carefully. Check for dead squares before committing."
+const DefaultOperatorPrompt = "Plan crate pushes carefully. Check for dead squares before committing."
 
 proc seedOf(value: string): int64 =
   var hash = 2166136261'u32
@@ -18,7 +18,7 @@ proc actionChoices(): JsonNode =
     for dir in Dirs:
       result.add(%*{"do": "push", "box": box, "dir": $dir, "times": 1})
 
-proc decision(game: SimServer, id: int): JsonNode =
+proc decision(game: SimServer, id: int, languageMode: bool, operatorPrompt: string): JsonNode =
   var required = newJArray()
   var properties = newJObject()
   for slot in 0 ..< game.config.maxActionsPerTurn:
@@ -29,20 +29,27 @@ proc decision(game: SimServer, id: int): JsonNode =
       {"type": "object", "required": ["do"]}
     ]}
   let view = game.observationJson(0)
-  %*{
+  result = %*{
     "kind": "decision", "game": "sokoban", "decision_id": id,
     "seat": 0, "engine_seat": 0, "turn": game.turnsPlayed,
     "semantic_view": view,
     "inbox": [],
     "messages": [
       {"role": "system", "content": SystemPrompt},
-      {"role": "user", "content": userMessage(OperatorPrompt, $view)}
+      {"role": "user", "content": userMessage(operatorPrompt, $view)}
     ],
     "speech_messages": [],
     "action_schema": {"type": "object", "required": required,
       "properties": properties},
     "typed_question": newJNull()
   }
+  result["inference_mode"] = if languageMode: %"text_action" else: newJNull()
+  if languageMode:
+    result["action_schema"] = %*{"type": "object", "properties": {
+      "actions": {"type": "array", "maxItems": game.config.maxActionsPerTurn,
+        "items": {"type": "object", "required": ["do"], "properties": {
+          "do": {"type": "string", "enum": ["push", "goto", "moves", "wait"]}}}},
+      "say": {"type": "string"}, "notes": {"type": "string"}}}
 
 proc encoding(game: SimServer, id: int): JsonNode =
   let view = game.observationJson(0)
@@ -108,9 +115,12 @@ proc encoding(game: SimServer, id: int): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: sokoban-train-bridge MANIFEST [ladder|hard]", 1)
-  let variant = if args.len == 2: args[1] else: "ladder"
+  if args.len notin 1 .. 4:
+    quit("usage: sokoban-train-bridge MANIFEST [ladder|hard] [--language] [OPERATOR_PROMPT]", 1)
+  let variant = if args.len >= 2: args[1] else: "ladder"
+  let languageMode = args.len >= 3
+  if languageMode: doAssert args[2] == "--language"
+  let operatorPrompt = if args.len == 4: args[3] else: DefaultOperatorPrompt
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
@@ -119,6 +129,7 @@ when isMainModule:
   doAssert not variantConfig.isNil, "unknown variant: " & variant
   var game: SimServer
   var id = 0
+  var rejectedAttempts = 0
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
     var response: JsonNode
@@ -134,13 +145,14 @@ when isMainModule:
       game.startLevel(generateLevel(config.seed, index,
         game.tierOf(index), config.genNodeCap, config.genAttemptCap))
       id = 0
-      response = game.decision(id)
+      rejectedAttempts = 0
+      response = game.decision(id, languageMode, operatorPrompt)
     of "encode":
-      doAssert not game.episodeOver()
+      doAssert not game.episodeOver() and not languageMode
       response = game.encoding(id)
     of "teacher":
       doAssert not game.episodeOver()
-      let directive = game.scriptedDirective(blPusher)
+      let directive = scriptedPlanForView(game.observationJson(0), blPusher)
       doAssert directive.actions.len <= game.config.maxActionsPerTurn
       var action = newJObject()
       for slot in 0 ..< game.config.maxActionsPerTurn:
@@ -149,24 +161,47 @@ when isMainModule:
             directive.actions[slot].actionJson()
           else:
             %"stop"
-      response = %*{"response": $action}
+      response = %*{"response": $(if languageMode:
+        directive.directiveJson()
+        else: action)}
     of "step":
       doAssert not game.episodeOver() and request["decision_id"].getInt() == id
-      let action = parseJson(request["response"].getStr())
-      var actions = newJArray()
-      for slot in 0 ..< game.config.maxActionsPerTurn:
-        let choice = action["action" & $slot]
-        if choice.kind != JString:
-          actions.add(choice)
+      var action: JsonNode
+      var directive: Directive
+      var consumedReason = ""
+      if languageMode:
+        let parsedReply = parseReplyObject(request["response"].getStr())
+        if parsedReply.kind == rokRejected:
+          inc rejectedAttempts
+          if rejectedAttempts < 2:
+            stdout.writeLine($ %*{"kind": "rejected", "reason": parsedReply.reason,
+              "observation": game.decision(id, languageMode, operatorPrompt)})
+            stdout.flushFile()
+            continue
+          directive = scriptedPlanForView(game.observationJson(0), blPusher)
+          consumedReason = parsedReply.reason
         else:
-          doAssert choice.getStr() == "stop"
-      let directive = parseDirective(%*{"actions": actions}, game.config.maxActionsPerTurn)
-      doAssert directive.dropped == 0 and directive.overCap == 0
+          directive = parseDirective(parsedReply.payload, game.config.maxActionsPerTurn)
+          if directive.dropped > 0 or directive.overCap > 0:
+            consumedReason = "engine_dropped_invalid_actions"
+        action = directive.directiveJson()
+      else:
+        action = parseJson(request["response"].getStr())
+        var actions = newJArray()
+        for slot in 0 ..< game.config.maxActionsPerTurn:
+          let choice = action["action" & $slot]
+          if choice.kind != JString:
+            actions.add(choice)
+          else:
+            doAssert choice.getStr() == "stop"
+        directive = parseDirective(%*{"actions": actions}, game.config.maxActionsPerTurn)
+        doAssert directive.dropped == 0 and directive.overCap == 0
       game.beginTurn(directive)
       while not game.turnComplete():
         game.stepTick()
       game.endTurn("")
       inc id
+      rejectedAttempts = 0
       var observation: JsonNode
       if game.episodeOver():
         game.settle(endComplete,
@@ -187,9 +222,11 @@ when isMainModule:
           game.startLevel(generateLevel(game.config.seed, index,
             game.tierOf(index), game.config.genNodeCap,
             game.config.genAttemptCap))
-        observation = game.decision(id)
-      response = %*{"kind": "accepted", "action": action,
-        "observation": observation}
+        observation = game.decision(id, languageMode, operatorPrompt)
+      response = if consumedReason.len > 0:
+        %*{"kind": "consumed_rejection", "reason": consumedReason,
+          "action": action, "observation": observation}
+        else: %*{"kind": "accepted", "action": action, "observation": observation}
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())
     stdout.writeLine($response)
