@@ -80,6 +80,7 @@ type
     stopIssuedAt, acknowledgementDeadline, episodeDeadline: MonoTime
     acknowledgedSlots: HashSet[int]
     trajectory: Option[DecisionTrajectory]
+    runtimeInputs: JsonNode
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
     viewerStates: Table[WebSocket, GlobalViewerState]
@@ -354,6 +355,7 @@ proc finishEpisode(writer: ReplayWriter, log: EventLog, status: EpisodeStatus) =
     let privateOutcome = copy(results)
     privateOutcome["engine_rules_version"] = %GameVersion
     privateOutcome["player_cleanup"] = cleanup
+    privateOutcome["runtime_inputs"] = copy(shared.runtimeInputs)
     if shared.trajectory.isSome:
       for id, decision in shared.decisions:
         var attempts: seq[DecisionAttempt]
@@ -979,13 +981,15 @@ proc stopServer*() =
   if gameServer != nil:
     gameServer.close()
 
-proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig, episodeDeadline: MonoTime) =
+proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig,
+    episodeDeadline: MonoTime, runtimeInputs: JsonNode) =
   if config.tokens.len != config.numAgents:
     raise newException(SokobanError,
       "tokens must name exactly num_agents seats")
   runtimeCfg = runtimeConfig
   eventsSinkPath = requireFileUri("COGAME_EVENTS_URI")
   shared.episodeDeadline = episodeDeadline
+  shared.runtimeInputs = copy(runtimeInputs)
   if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
     shared.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
       "sokoban-" & $config.seed, "sokoban", getEnv("COWORLD_GAME_VERSION"),

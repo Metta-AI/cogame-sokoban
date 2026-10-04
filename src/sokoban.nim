@@ -100,7 +100,8 @@ when isMainModule:
       " wallClock=", config.wallClockBudgetSeconds, "s",
       " turnBudgetMs=", config.turnBudgetMs
     try:
-      runGameServer(config, runtimeConfig, episodeDeadline)
+      runGameServer(config, runtimeConfig, episodeDeadline,
+        runtimeInputCapturesJson(inputCaptures))
     except CatchableError as error:
       writeInitializationCheckpoint(esFailed, "runtime_owner", $error.name, error.msg,
         episodeDeadline, runtimeInputCapturesJson(inputCaptures))
