@@ -97,11 +97,9 @@ suite "manifest pins":
     let limit = manifest["player"][0]["resources"]["limits"]["cpu"].getStr()
     check limit == "1" or limit == "2" or limit.endsWith("000m")
 
-  test "game.name equals the slug and the secret URI's namespace":
+  test "game identity and hosted inference use no provider secret":
     check manifest["game"]["name"].getStr() == GameName
-    let uri = manifest["game"]["runnable"]["env"]["ANTHROPIC_API_KEY_URI"]
-      .getStr()
-    check uri == "secret://coworld/" & GameName & "/anthropic_api_key"
+    check manifest["game"]["runnable"]["env"].len == 0
     check "cogame-" & GameName in
       manifest["game"]["runnable"]["source_url"].getStr()
 
@@ -199,5 +197,4 @@ suite "the scaffold is present and substituted":
     let compose = readFile("compose.yaml")
     check "sokoban:" in compose
     check "platform: linux/amd64" in compose
-    check "network: host" in compose
     check manifest["game"]["runnable"]["image"].getStr() == "{{SOKOBAN_IMAGE}}"

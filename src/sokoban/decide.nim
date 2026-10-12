@@ -252,7 +252,7 @@ proc turn*(
         "JSON object described above, starting with '{', with an \"actions\" " &
         "array of at most 8 entries.")
     let request = engine.client.requestFor(
-      SystemPrompt, userMessage(engine.seats[seat].prompt, user))
+      SystemPrompt, userMessage(engine.seats[seat].prompt, user), seat)
     # ONE seat, so this is a batch of ONE through the starter's unchanged
     # batching path. The code is the starter's; the batch simply carries one
     # request.
